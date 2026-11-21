@@ -14,11 +14,14 @@ CSI="$DEV/tools/la_csi_series.py"
 CAPTURE_COUNT="${WIFI_PRESENCE_CAPTURE_COUNT:-10}"
 CAPTURE_INTERVAL_MS="${WIFI_PRESENCE_CAPTURE_INTERVAL_MS:-1000}"
 RUN_TIMEOUT="${WIFI_PRESENCE_CAPTURE_TIMEOUT_SEC:-120}"
+LA_TRIGGER="${WIFI_PRESENCE_LA_TRIGGER:-cca}"
+LA_POST_TRIGGER_US="${WIFI_PRESENCE_LA_POST_TRIGGER_US:-200}"
 
 usage() {
   echo "Usage: sudo bash $0 [channel]" >&2
   echo "Default channel: auto-detected from the currently connected wlp1s0 link." >&2
-  echo "Defaults: 10 captures, 1000 ms between captures." >&2
+  echo "Defaults: CCA trigger, 200 us post-trigger, 10 captures, 1000 ms interval." >&2
+  echo "Override trigger/time with WIFI_PRESENCE_LA_TRIGGER and WIFI_PRESENCE_LA_POST_TRIGGER_US." >&2
   echo "Override count/interval with WIFI_PRESENCE_CAPTURE_COUNT and WIFI_PRESENCE_CAPTURE_INTERVAL_MS." >&2
   echo "Override PCI BDF with WIFI_PRESENCE_BDF." >&2
 }
@@ -45,6 +48,16 @@ if ! [[ "$CAPTURE_COUNT" =~ ^[0-9]+$ ]] || (( CAPTURE_COUNT < 2 || CAPTURE_COUNT
 fi
 if ! [[ "$CAPTURE_INTERVAL_MS" =~ ^[0-9]+$ ]] || (( CAPTURE_INTERVAL_MS < 100 || CAPTURE_INTERVAL_MS > 10000 )); then
   echo "ERROR: capture interval must be between 100 and 10000 ms." >&2; exit 2
+fi
+
+
+case "$LA_TRIGGER" in
+  cca|crcok|crcfail) ;;
+  *) echo "ERROR: LA trigger must be one of: cca, crcok, crcfail." >&2; exit 2 ;;
+esac
+if ! [[ "$LA_POST_TRIGGER_US" =~ ^[0-9]+$ ]] || (( LA_POST_TRIGGER_US < 20 || LA_POST_TRIGGER_US > 380 )); then
+  echo "ERROR: post-trigger time must be between 20 and 380 us for the 8192-sample window." >&2
+  exit 2
 fi
 
 # Default to the channel the laptop is already using. This is read-only and
@@ -129,11 +142,11 @@ RTL8821CE PCIe LA capture
   PCI device : $BDF (10ec:c821)
   driver now : $DRIVER_BEFORE
   channel    : $CHANNEL / 20 MHz
-  trigger    : CRC-OK (ambient received frame)
+  trigger    : $LA_TRIGGER (ambient channel activity)
   LA mode    : 20 Msps, dma0, BB debug port 0x880
   captures   : $CAPTURE_COUNT
   interval   : $CAPTURE_INTERVAL_MS ms between captures
-  buffer     : full 8192-sample ring; 20 us post-trigger
+  buffer     : full 8192-sample ring; $LA_POST_TRIGGER_US us post-trigger
   output     : $OUT_DIR/capture.NNNN.bin
   CSI series : $CSI_SERIES
 
@@ -154,7 +167,7 @@ RX_ENV=(
   DEVOURER_BW=20
   DEVOURER_LOG_LEVEL=debug
   DEVOURER_LA_DELAY_MS=2000
-  DEVOURER_LA_CAPTURE=crcok/20M/dma0/port:0x880/t20/all
+  DEVOURER_LA_CAPTURE="$LA_TRIGGER/20M/dma0/port:0x880/t$LA_POST_TRIGGER_US/all"
   DEVOURER_LA_OUT="$CAPTURE_BASE"
   DEVOURER_LA_MAX=8192
   DEVOURER_LA_COUNT="$CAPTURE_COUNT"

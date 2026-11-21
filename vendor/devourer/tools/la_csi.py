@@ -12,9 +12,9 @@ host path.
     la_csi.py --selftest        # synthetic L-LTF through a 2-tap channel
 
 Requires a capture at 20 Msps of a 20 MHz channel (the standard L-LTF
-sample grid): DEVOURER_LA_CAPTURE=crcok/20M/dma0/port:0x880 — the CRC-OK
-trigger fires at frame *end*, and the wrapped ring holds the whole frame
-including the preamble.
+sample grid): prefer a CCA-triggered capture such as
+DEVOURER_LA_CAPTURE=cca/20M/dma0/port:0x880/t200/all. A CRC-OK trigger
+fires at frame end; the finite ring can exclude the preamble of long frames.
 
 Detection: 64-lag autocorrelation plateau (the LTF's two identical
 periods), refined by cross-correlation against the reference symbol.

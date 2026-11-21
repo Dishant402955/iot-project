@@ -5,7 +5,8 @@
 - Confirmed once on target hardware: 8,192 raw IQ samples at 20 Msps, RTL8821C cut 4 (UMC), L-LTF detection, 52 active-subcarrier H(k) magnitude/phase estimates.
 - Implemented: sequential capture/re-arm in one `rxdemo` process; each capture gets a distinct DVLA file; successful capture events include monotonic process uptime; graceful stop after the configured count; per-capture CSI extraction into a combined JSONL.
 - Software validation: `rxdemo` builds; `LaCaptureSequenceSelftest` passes; `la_csi_math` passes.
-- Pending: one local hardware run of the repeated sequence. No remote VFIO bind or Wi-Fi disruption has been performed for this stage.
+- Hardware repeated-capture run (2026-11-21): 10/10 distinct 8,192-sample raw IQ captures succeeded and the driver restored. Only 1/10 contained a detectable L-LTF. The run used a CRC-OK (frame-end) trigger with a 409.6 us ring and 20 us post-trigger; this can omit the preamble of longer frames.
+- Next acquisition uses a CCA (channel-activity) trigger with 200 us post-trigger, matching the project’s existing LA/SDR cross-check procedure. This is a hypothesis to validate on hardware, not a proven fix.
 
 ## Run
 
@@ -15,13 +16,15 @@ From the project root, at the physical console of the laptop:
 sudo bash tools/rtl8821ce_pcie_la_capture.sh
 ```
 
-The current channel is auto-detected from `wlp1s0` before binding. Defaults are 10 captures, 1,000 ms between captures, and a 120-second overall deadline. The adapter is temporarily detached from `rtw_8821ce` while VFIO owns it, so Wi-Fi is unavailable during the run. The script does not restart NetworkManager or reboot. Its exit trap restores `rtw_8821ce` and, when invoked through sudo, transfers the result directory back to the invoking user.
+The current channel is auto-detected from `wlp1s0` before binding. Defaults are CCA-triggered capture with 200 us post-trigger, 10 captures, 1,000 ms between captures, and a 120-second overall deadline. The adapter is temporarily detached from `rtw_8821ce` while VFIO owns it, so Wi-Fi is unavailable during the run. The script does not restart NetworkManager or reboot. Its exit trap restores `rtw_8821ce` and, when invoked through sudo, transfers the result directory back to the invoking user.
 
 Optional environment settings:
 
 - `WIFI_PRESENCE_CAPTURE_COUNT`: 2–50 captures (default 10).
 - `WIFI_PRESENCE_CAPTURE_INTERVAL_MS`: 100–10,000 ms (default 1,000).
 - `WIFI_PRESENCE_CAPTURE_TIMEOUT_SEC`: overall acquisition deadline (default 120).
+- `WIFI_PRESENCE_LA_TRIGGER`: `cca` (default), `crcok`, or `crcfail`.
+- `WIFI_PRESENCE_LA_POST_TRIGGER_US`: post-trigger time in microseconds (20–380, default 200).
 
 ## Outputs
 
