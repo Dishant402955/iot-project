@@ -1,17 +1,21 @@
 # CMake and local build outputs
 /build/
 /build-*/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-compile_commands.json
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+/compile_commands.json
+/vendor/devourer/build/
+/vendor/devourer/build-*/
+/vendor/devourer/CMakeFiles/
+/vendor/devourer/CMakeCache.txt
+/vendor/devourer/cmake_install.cmake
+/vendor/devourer/Makefile
 
 # Project-local toolchains and downloaded packages
 /vendor/.local-deps/
 /vendor/.venv/
-/vendor/devourer/build/
-/vendor/devourer/build-*/
 /vendor/devourer/.git/
 
 # Python caches
