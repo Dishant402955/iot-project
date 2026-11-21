@@ -1,0 +1,406 @@
+#ifndef RTL_KESTREL_DEVICE_H
+#define RTL_KESTREL_DEVICE_H
+
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <thread>
+
+#include "TxMode.h"
+
+#include "logger.h"
+#include "DeviceConfig.h"
+#include "IRtlRadio.h"
+#include "RtlAdapter.h"
+#include "RxQuality.h" /* RxQualityAccumulator + build_rx_quality */
+#include "SelectedChannel.h"
+
+#include "ChipVariant.h"
+#include "FrameParserKestrel.h" /* KestrelPhySts (cached per-path phy-status) */
+#include "HalKestrel.h"
+
+namespace kestrel {
+
+/* AX-native chip identity, read via ReadChipInfo(). On this generation the
+ * byte at 0x00FC is R_AX_SYS_CHIPINFO (the D-die id: 0x51 = 8852B, 0x52 =
+ * 8852C) and the cut version is the high nibble of R_AX_SYS_CFG1+1 (0x00F1):
+ * 0 = CAV, 1 = CBV, 2 = CCV, ... — the mac_ax get_chip_info() read pair. */
+struct ChipInfo {
+  uint8_t die_id = 0; /* R_AX_SYS_CHIPINFO (0x00FC) */
+  uint8_t cut = 0;    /* rtw_cv: R_AX_SYS_CFG1[15:12] */
+  bool matches(ChipVariant v) const {
+    return (v == ChipVariant::C8852B && die_id == 0x51) ||
+           (v == ChipVariant::C8852C && die_id == 0x52);
+  }
+};
+
+} /* namespace kestrel */
+
+/* RtlKestrelDevice is the orchestrator for the Realtek "Kestrel" Wi-Fi 6 /
+ * 802.11ax family (G6 "phl" vendor architecture) — RTL8852BU/8832BU and
+ * RTL8852CU/8832CU. It implements the same IRadio contract as the three
+ * Jaguar (11ac) generations so the demos and WiFiDriver factory treat all
+ * four uniformly.
+ *
+ * Ported from the vendor trees reference/rtl8852bu (v1.19.21) and
+ * reference/rtl8852cu (v1.19.22). The layer split: the mac_ax plane (identity,
+ * power-on, firmware download, efuse, MAC TRX init, H2C/C2H, descriptors) is
+ * hand-ported C++ here + HalKestrel/KestrelFw; the halbb PHY and halrf
+ * calibration planes are the vendor C compiled verbatim (hal/halbb, hal/halrf)
+ * behind the kestrel glue. */
+class RtlKestrelDevice : public IRtlRadio {
+public:
+  RtlKestrelDevice(RtlAdapter device, Logger_t logger,
+                   kestrel::ChipVariant variant = kestrel::ChipVariant::C8852B,
+                   devourer::DeviceConfig cfg = {});
+  ~RtlKestrelDevice() override;
+
+  void Init(Action_ParsedRadioPacket packetProcessor,
+            SelectedChannel channel) override;
+  void InitWrite(SelectedChannel channel) override;
+  void StartRxLoop(Action_ParsedRadioPacket packetProcessor) override;
+  void StopRxLoop() override { _rx_stop = true; }
+  /* Join the WP-release drain thread (started by InitWrite) before the caller
+   * tears libusb down — a thread still inside libusb_handle_events when
+   * libusb_exit runs trips libusb's usbi_mutex_destroy assertion (SIGABRT at
+   * demo shutdown). The destructor joins too, but the demos destroy the
+   * device object after libusb_exit, so Stop() is the ordered join point. */
+  void Stop() override {
+    _ack_disarm_thread = {}; /* cancel + join a pending test disarm */
+    _rx_stop = true;
+    stop_wp_drain();
+    pcie_quiesce();
+  }
+  void SetMonitorChannel(SelectedChannel channel) override;
+  /* Disable / restore the MAC carrier-sense gate (R_AX_CCA_CFG_0 all-CCA-EN:
+   * primary + sec20/40/80 + EDCCA). Injection is already CCA-off by default here
+   * (EnableTxScheduler clears these gates), so this is a runtime toggle, not the
+   * co-channel-deferral fix it is on Jaguar. */
+  void SetCcaMode(bool disabled) override;
+  /* The two halves of R_AX_CCA_CFG_0's gate field: "primary" = CCA_EN +
+   * SEC20/40/80 (bits 0-3, the preamble/sub-channel carrier sense), "edcca" =
+   * EDCCA_EN (bit 4, raw in-band energy). Post-bring-up only, per the
+   * IRtlRadio contract; SetCcaMode(d) == SetCcaGates(d, d). */
+  bool SetCcaGates(bool primary_disabled, bool edcca_disabled) override;
+  bool GetCcaGates(bool &primary_disabled, bool &edcca_disabled) override;
+  /* Hardware ACK responder (IRadio contract). The AX MAC has no Jaguar-style
+   * port identity register to retarget: the RMAC answers for an address only
+   * once the firmware has COMMITTED a valid ADDR_CAM entry for it, and it does
+   * that only for a station registered the way a real association registers
+   * one (HalKestrel::register_infra_sta). The arm programs that station with
+   * `mac` as its own address, on its own macid / ADDR_CAM entry (ack_slot())
+   * so the injection context at macid 0 / entry 0 (what every injected frame's
+   * WD points at) is left as bring-up programmed it, and RegisterPeerSta /
+   * RegisterBeamformee refuse that slot so a peer cannot take it; clears the
+   * response-abort CCA gates; and is verified by reading the physical CAM
+   * entry back -- false when the entry did not commit. The 8852C firmware
+   * ignores the addr_cam H2C, so on that die the host writes the same entry
+   * itself (HalKestrel::write_addr_cam_sta, the vendor's no-firmware path) and
+   * no H2C is sent. Post-bring-up only. Clear disconnects that station (8852B
+   * only) and clears the entry's VALID bit from the host (the 8852B firmware
+   * leaves a disconnected station's entry valid), and succeeds only once the
+   * entry has read back empty for 50 ms; an address still held after a failed
+   * clear (or a failed retarget, which checks the old address too) stays
+   * recorded, so a later ClearAckResponder retries it. Arm and clear are
+   * serialized. On the 8852C the response also depends on the bring-up
+   * taking the TX path selection from the BB's P-MAC registers
+   * (kestrel_halbb_ctrl_tx_path); without it some bring-ups armed and
+   * answered no ACK (docs/kestrel-ack-responder.md). */
+  bool SetAckResponder(const devourer::MacAddr &mac) override;
+  void ClearAckResponder() override;
+  /* rxdemo's live-disarm measurement hook (DEVOURER_ACK_DISARM_AFTER_MS): the
+   * delay starts once Init has finished the bring-up, including a configured
+   * SetAckResponder, never from process start. */
+  void ScheduleAckResponderDisarmForTest(uint32_t delay_ms) {
+    _ack_disarm_after_ms = delay_ms;
+  }
+  bool send_packet(const uint8_t *packet, size_t length) override;
+  devourer::TxStats GetTxStats() override { return _device.GetTxStats(); }
+  SelectedChannel GetSelectedChannel() override { return _channel; }
+
+  /* EFUSE MAC at logical 0x488 on both dies: mac_ax's USB efuse-info dispatch
+   * has no 8852C entry and falls back to the 8852B table (efuse.c
+   * offset_usb_8852b), so one constant serves both. Served from the bring-up
+   * parse — false before Init/InitWrite, or when the EFUSE is unprogrammed
+   * (autoload_ok is exactly the all-FF / all-00 MAC check). */
+  bool GetPermanentMacAddress(uint8_t out[6]) override {
+    if (out == nullptr || !_efuse.autoload_ok)
+      return false;
+    std::memcpy(out, _efuse.mac.data(), _efuse.mac.size());
+    return true;
+  }
+
+  /* Static capability aggregate (resolved from chip identity; thread-safe,
+   * callable pre-Init). The demos emit it as the adapter.caps JSONL event. */
+  devourer::TxCaps GetTxCaps() override;
+  devourer::AdapterCaps GetAdapterCaps() override;
+
+  /* Runtime TX-power lever: fixed-dBm BB power (halbb_set_txpwr_dbm) with a
+   * quarter-dB offset relative to the DEVOURER_TX_PWR base. Sticky across
+   * SetMonitorChannel. Per-packet: a radiotap DBM_TX_POWER dB-delta on a
+   * frame overrides this for that frame via a fixed-dBm rewrite in
+   * send_packet (2 BB RMWs on value change, free while constant). */
+  devourer::TxPowerCaps GetTxPowerCaps() override;
+  int SetTxPowerOffsetQdb(int qdb) override;
+  devourer::TxPowerState GetTxPowerState() override;
+
+  /* Caller-supplied per-rate power shape (src/TxPower.h). This family has no
+   * per-rate TXAGC table, so the diff for the frame's own rate folds into the
+   * fixed-dBm target inside send_packet — see the two consequences documented
+   * on _rate_diff_qdb below. */
+  bool SetTxPowerRateDiffs(
+      const std::optional<devourer::TxRateDiffsQdb> &diffs) override;
+  /* The configured diff (qdB) for one MGN_* rate, 0 when no table is set. */
+  int rate_diff_qdb_for(uint8_t mgn_rate) const;
+
+  /* Runtime TX-mode default (DEVOURER_TX_RATE): rate/BW/GI/LDPC/STBC applied to
+   * a rate-less frame (e.g. the demo beacon). A per-packet radiotap rate always
+   * wins. Mirrors the Jaguar behaviour so DEVOURER_TX_RATE works uniformly. */
+  void SetTxMode(const devourer::TxMode &mode) override;
+  void ClearTxMode() override;
+
+  /* 64-bit free-running MAC TSF (band-0 port-0). mac_get_tsf (twt.c). */
+  uint64_t ReadTsf() override;
+
+  /* Bare band-0 port-0 TSF write (LOW then HIGH). On the AX MAC the beacon
+   * TBTT is hardware-locked to this TSF grid (bench, RTL8852CE: a +30 ms TSF
+   * step left the on-air beacon phase at TSF%interval unchanged; toggling
+   * BCNTX_EN / PORT_FUNC_EN re-latches nothing) — so a write moves an active
+   * beacon's TBTT with it, the Jaguar1 model. PCIe-measured only. */
+  bool WriteTsf(uint64_t tsf) override;
+
+  /* Port-0 TSF, then R_AX_FREERUN_CNT (never moved by WriteTsf), each with a
+   * hi/lo/hi wrap guard. */
+  bool ReadTsfAndFreeRun(uint64_t &tsf, uint64_t &freerun) override;
+  /* Beacon EDCA random backoff on/off (HalKestrel::set_beacon_backoff). */
+  bool SetBeaconBackoff(bool random) override;
+
+  /* Jaguar1 semantics (see IRadio): the AX TBTT already sits on the TSF grid,
+   * so offset 0 holds natively and a nonzero TSF-preserving pin is physically
+   * unavailable — refused with a one-time warning. Discipline the TSF itself
+   * (WriteTsf) to steer the TBTT. */
+  int32_t PinBeaconTbtt(int32_t offset_us) override;
+
+  /* Lean intra-band 20 MHz retune (frequency hopping) — RF channel only, skips
+   * the BB bandwidth config + RX-DCK. Falls back to SetMonitorChannel on a band
+   * change or a non-20 MHz width. */
+  void FastRetune(uint8_t channel, bool cache_rf = true) override;
+
+  /* Lean same-channel 20 <-> 5/10 MHz narrowband toggle (BB small-BW field
+   * only). Falls back to SetMonitorChannel for 40/80 MHz. */
+  void FastSetBandwidth(ChannelWidth_t bw) override;
+
+  /* Chip thermal-meter snapshot (halrf_get_thermal_8852b, RF path-A 0x42) with
+   * the efuse baseline. Control-thread only (does an RF read). */
+  devourer::ThermalStatus GetThermalStatus() override;
+
+  /* Frame-free RX energy snapshot. On Kestrel this carries only the active
+   * absolute noise floor (halbb NHM env-monitor) when DEVOURER_RX_NOISE_FLOOR is
+   * set — there is no phydm FA/CCA/IGI DIG monitor on this generation. */
+  RxEnergy GetRxEnergy(bool with_nhm) override;
+  /* Windowed RX link-quality: the passive rssi-snr floor + LinkHealth verdict
+   * (fed per frame via _rxq) fused with the active NHM floor from GetRxEnergy. */
+  devourer::RxQuality GetRxQuality() override;
+  /* Live per-chain RX-path activity (fed via _rxpaths in the RX loop): per-
+   * antenna RSSI/SNR/EVM window means from the physts per-path pages. */
+  devourer::ActiveRxPaths GetActiveRxPaths() override {
+    return _rxpaths.snapshot();
+  }
+
+  /* Arm the AX HW beacon engine (mac_send_bcn_h2c + AP port timing). Requires a
+   * prior InitWrite. `beacon` is a full 802.11 beacon; the MAC airs it every
+   * `interval_tu` TU with the live TSF inserted. */
+  bool StartBeacon(const uint8_t *beacon, size_t len, int interval_tu) override;
+  /* New content for the armed beacon (BCN_UPD H2C; port/TBTT untouched). */
+  bool UpdateBeaconPayload(const uint8_t *beacon, size_t len) override;
+  /* BCNTX_EN off; returns false when no beacon is armed. */
+  bool StopBeacon() override;
+  int _bcn_interval_tu = 0; /* >0 while a HW beacon is armed (StartBeacon) */
+
+  /* 802.11ax scheduled UL: air an HE Basic Trigger (UL-OFDMA grant), program
+   * TWT agreements + STA binds, and the fw-autonomous trigger cadence
+   * (TWT-OFDMA or the UL_FIXINFO table). Require a prior InitWrite. */
+  bool SendTrigger(const devourer::TriggerConfig &cfg) override;
+  bool ConfigureTwt(const devourer::TwtConfig &cfg) override;
+  bool TeardownTwt(const devourer::TwtConfig &cfg) override;
+  bool TwtBindSta(const devourer::TwtStaAct &act) override;
+  bool ConfigureTwtOfdma(const devourer::TwtOfdmaConfig &cfg) override;
+  bool ConfigureUlOfdma(const devourer::UlOfdmaConfig &cfg) override;
+
+  /* Register an associated peer STA (macid/addr-cam) so a Trigger's per-user
+   * grant scores against it — the AP-side companion to SendTrigger for the
+   * end-to-end UL path. Refuses the ACK responder's slot (ack_slot()) and an
+   * `addr_cam_idx` past the 128-entry CAM, as does RegisterBeamformee. */
+  bool RegisterPeerSta(const uint8_t peer_mac[6], uint8_t macid,
+                       uint8_t addr_cam_idx) override;
+
+  /* HE sounding command surface: register an associated beamformee, then drive a
+   * sounding intended to air NDPA -> NDP -> BFRP and receive the report HE TB
+   * PPDU. NB the shipped client NIC fw accepts SET_SND_PARA but does not air it
+   * (AP-firmware-only transmit engine); see docs/he-trigger-ul.md. */
+  bool RegisterBeamformee(const uint8_t peer_mac[6], uint8_t macid,
+                          uint8_t addr_cam_idx,
+                          const devourer::StaBfCaps &bf) override;
+  bool StartSounding(const devourer::SoundingConfig &cfg) override;
+
+  /* AX-native identity read (no power-on needed — the identity block is alive
+   * as soon as the USB function enumerates). kestrelprobe stage "id" and the
+   * constructor's confirmation log both come through here. */
+  kestrel::ChipInfo ReadChipInfo();
+
+  kestrel::ChipVariant variant() const { return _variant; }
+
+  /* Staged bring-up, exposed for kestrelprobe's "power" stage: power the MAC
+   * on and dump the efuse. Not part of the IRadio contract (Init/InitWrite
+   * drive the full sequence). Returns false on failure. */
+  bool PowerOnAndReadEfuse(kestrel::EfuseInfo &out);
+
+  /* kestrelprobe "fw" stage: power on, read efuse, then download firmware.
+   * Returns false at the first failing step. */
+  bool PowerOnEfuseAndFw(kestrel::EfuseInfo &out);
+
+  /* kestrelprobe "trx" stage: everything in "fw" plus the DMAC-half MAC TRX
+   * init. Returns false at the first failing step. */
+  bool PowerOnFwAndTrx(kestrel::EfuseInfo &out);
+
+  /* kestrelprobe "phy" stage: everything in "trx" plus the BB + RF table
+   * apply. Returns false at the first failing step. */
+  bool PowerOnTrxAndPhy(kestrel::EfuseInfo &out);
+
+  kestrel::HalKestrel &hal() { return _hal; }
+
+  /* Full monitor bring-up (power -> efuse -> fw -> MAC TRX -> BB/RF -> channel)
+   * without starting the RX loop. Returns false at the first failing step.
+   * Init() calls this then StartRxLoop; a probe "rx"/"chan" stage can call it
+   * standalone. */
+  bool BringUpMonitor(SelectedChannel channel);
+
+  /* TX-only scheduler enablement (CMAC port + CTN_TXEN); clears the CCA gates,
+   * so it is kept out of BringUpMonitor to leave RX-only CCA on. InitWrite
+   * calls it after the shared bring-up. */
+  void EnableTxScheduler();
+
+private:
+  /* One pass of BringUpMonitor, no firmware-halt check. */
+  bool BringUpMonitorOnce(SelectedChannel channel);
+  /* The TX half of InitWrite, run after BringUpMonitorOnce. */
+  void InitWriteTail(SelectedChannel channel);
+  /* Run `once` (a full bring-up from power_on), then read HALT_C2H_CTRL. A
+   * bring-up can end with the firmware halted (L1 pre-error 0x999, then an
+   * assertion) while every step reported success; the radio then works for a
+   * while and its TX queues stop draining for good. Redo the bring-up, up to
+   * kFwHaltAttempts in all on USB (PCIe: no redo). False, with the bulk-IN
+   * drain stopped, when `once` fails or every attempt halts. */
+  bool BringUpCheckingFwHalt(const char *what,
+                             const std::function<bool()> &once);
+  static constexpr int kFwHaltAttempts = 3;
+
+  /* Route a C2H firmware message (RPKT_TYPE_C2H payload). Currently decodes the
+   * USR_TX_RPT_INFO report and emits its freerun TX-egress timestamp. */
+  void handle_c2h(const uint8_t *payload, uint32_t len);
+
+  RtlAdapter _device;
+  Logger_t _logger;
+  kestrel::ChipVariant _variant;
+  devourer::DeviceConfig _cfg;
+  kestrel::HalKestrel _hal;
+  SelectedChannel _channel{};
+  kestrel::EfuseInfo _efuse{};
+  volatile bool _rx_stop = false;
+
+  void start_rx_loop(Action_ParsedRadioPacket packetProcessor, bool clear_stale);
+
+  /* WP-release drain (Kestrel STF USB): the fw returns each transmitted frame's
+   * WD/PLE pages as an RX packet (rpkt_type=7, TX_PD_RELEASE_HOST) on the bulk-
+   * IN. A TX-only path must still drain the bulk-IN or the pages never recycle
+   * and the mgmt bulk-OUT stalls after ~103 frames. InitWrite starts this
+   * background drain; StartRxLoop hands the bulk-IN over to itself (which also
+   * drains type-7), so the two never read the endpoint concurrently. */
+  std::thread _wp_drain_thread;
+  volatile bool _wp_drain_stop = true;
+  void start_wp_drain();
+  void stop_wp_drain();
+  /* PCIe: stop the HAXI DMA engine + clear the ring indices (HalKestrel::
+   * pcie_deinit) exactly once, from Stop() or the destructor, whichever comes
+   * first — an RX-only session has the RXQ DMA live too, and the transport
+   * unmaps the slab right after the device goes away. No-op on USB. */
+  void pcie_quiesce();
+  bool _pcie_quiesced = false;
+  /* True while StartRxLoop's reap loop runs; pcie_quiesce waits for it to
+   * clear (bounded) so the DMA stop never races a reap in progress. */
+  std::atomic<bool> _rx_running{false};
+  /* TX queue handles, bus-neutral: on USB the bulk-OUT endpoint (B0MG =
+   * BULKOUTID0, ACH0 = BULKOUTID3), on PCIe the AX DMA channel itself (8, 0).
+   * ACH0 is channel 0, so "TX is up" is its own flag, not a non-zero handle. */
+  bool _tx_up = false;
+  bool _brought_up = false; /* Init/InitWrite completed the MAC bring-up */
+  /* Armed ACK responder address, and the R_AX_TRXPTCL_RESP_0 value the arm
+   * replaced (restored by ClearAckResponder). */
+  std::optional<devourer::MacAddr> _ack_responder;
+  uint32_t _ack_resp0_saved = 0;
+  /* Serializes SetAckResponder/ClearAckResponder: the test disarm below
+   * calls ClearAckResponder from its own thread. */
+  std::mutex _ack_mutex;
+  /* Rewrite macid 0 to the NO_LINK entry, restore RESP_0 and poll the CAM
+   * until it holds none of `held`. Returns the address still held on
+   * timeout, nullopt once gone. Caller holds _ack_mutex. */
+  std::optional<devourer::MacAddr>
+  disarm_ack_locked(std::span<const devourer::MacAddr> held);
+  /* The ACK responder's own macid and ADDR_CAM entry (the same number), past
+   * the injection context at macid 0 / entry 0 and the low slots peer
+   * registrations take by convention (RegisterPeerSta callers use 1, 2, ...).
+   * 127 on the 8852B, where the firmware commits and the RMAC answers there
+   * (measured); 63 on the 8852C, where the host writes it and the RMAC
+   * answers there (measured). Both dies have 128 entries. */
+  uint8_t ack_slot() const {
+    return _variant == kestrel::ChipVariant::C8852C ? 63 : 127;
+  }
+  /* Address-CAM entries (vendor ADDRCAM_NUM): 128 on both dies. */
+  static constexpr unsigned kAddrCamEntries = 128;
+  /* The 8852C firmware ignores the addr_cam H2C, so the ACK responder's
+   * station entry is written (and cleared) by the host on that die. */
+  bool host_written_ack_cam() const {
+    return _variant == kestrel::ChipVariant::C8852C;
+  }
+  /* True (and logged) when a peer registration would take the ACK
+   * responder's reserved macid or ADDR_CAM entry, or an ADDR_CAM entry past
+   * the CAM (kAddrCamEntries). */
+  bool peer_slot_reserved(const char *who, uint8_t macid,
+                          uint8_t addr_cam_idx) const;
+  std::optional<uint32_t> _ack_disarm_after_ms;
+  std::jthread _ack_disarm_thread;
+  /* DEVOURER_ACK_RESPONDER: arm at the end of bring-up, throw if refused. */
+  void arm_configured_ack_responder();
+  uint8_t _tx_mgmt_q = 0;
+  uint8_t _tx_data_q = 0;
+  bool _tx_data_ok = false; /* data frames may use _tx_data_q */
+  uint16_t _tx_seq = 0;    /* rolling 12-bit wifi sequence for injected frames */
+  std::optional<devourer::TxMode> _tx_mode_default; /* SetTxMode default */
+  int16_t _sess_pwr_qdb = 0; /* offset applied by SetTxPowerOffsetQdb — the
+                              * restore target for frames without a radiotap
+                              * DBM_TX_POWER field */
+  /* SetTxPowerRateDiffs, as a flat array in the TxRateDiffsQdb field order
+   * (cck, legacy, mcs0..7) rather than the struct, so send_packet can read the
+   * single entry its frame's rate needs with a relaxed atomic load: no lock
+   * lands on the TX hot path, and a table swapped mid-stream can only ever
+   * split BETWEEN frames, never within one. Two consequences of folding in
+   * software rather than in a per-rate hardware table, both real:
+   *   - the BB target is global, so a hardware-timed beacon airing between two
+   *     host frames inherits the last frame's rate diff, not its own rate's;
+   *   - a stream that alternates rates pays 2 BB register writes per change
+   *     (a fixed-rate stream pays once and then nothing). */
+  std::atomic<bool> _rate_diffs_on{false};
+  std::atomic<int8_t> _rate_diff_qdb[10]{};
+  /* Windowed RX link-quality accumulator (passive noise floor + LinkHealth),
+   * fed per decoded frame from the RX loop; drained by GetRxQuality. */
+  devourer::RxQualityAccumulator _rxq;
+  /* Live per-chain RX-path activity (per-antenna RSSI/SNR/EVM window means),
+   * fed per decoded frame; drained by GetActiveRxPaths. */
+  devourer::RxPathActivityAccumulator _rxpaths;
+};
+
+#endif /* RTL_KESTREL_DEVICE_H */

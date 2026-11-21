@@ -1,0 +1,174 @@
+# src/jaguar2/ — Jaguar2 (11ac gen2) working context
+
+Deep per-generation facts for this subtree, loaded alongside the root
+CLAUDE.md. Chips: RTL8822BU / RTL8812BU (chip-id `0x0a`) and RTL8811CU /
+RTL8821CU (chip 8821C, chip-id `0x09`); the RTL8821CE (PCIe) rides this same
+HAL through `PcieTransport`.
+
+## HAL layout
+
+Shared core (`RtlJaguar2Device`, `HalJaguar2`, `HalmacJaguar2Fw`/`MacInit`,
+`FrameParserJaguar2.h`) + per-variant strategy interfaces selected by
+`ChipVariant`: `Jaguar2PhyTables` → `Phy8822bTables`/`Phy8821cTables`,
+`Jaguar2Calibration` → `Halrf8822b`/`Halrf8821c`. Every strategy seam
+defaults to `C8822B`, so the 8822B path stays byte-identical when the 8821C
+variant is compiled out. A hybrid generation: HalMAC FW download / MAC init /
+power sequencing like Jaguar3, phydm `check_positive` register tables like
+Jaguar1 (shared `PhyTableLoader`).
+
+## Chip facts
+
+- **5/10 MHz narrowband on both variants**: a baseband ADC/DAC re-clock
+  packed into BB `0x8ac`; the RF stays in 20 MHz mode; applied as an
+  end-of-bring-up retune. The 8822B RF synth only re-latches on an RF18
+  *value edge*, so the narrowband path writes RF18 twice — same-value
+  rewrites do nothing; see the `set_channel_bw` NB branch and
+  `docs/narrowband.md`.
+- 5 MHz at 5 GHz is CFO-limited: subcarrier spacing shrinks 4× and a
+  far-offset TX/RX crystal pair syncs bimodally per bring-up — at 2.4 GHz
+  the same pair is stable (`tests/narrowband_cross_rx.sh` header).
+- Per-rate bandwidth-aware efuse TX power clamped to generated `txpwr_lmt`
+  tables (narrowband folds to the 20 MHz column).
+- Golden-init replay (`DEVOURER_REPLAY_WSEQ`, a captured kernel write stream
+  applied verbatim at the end of Init) is the debugging lever that found the
+  RF18-edge bug.
+- The TXAGC block is write-only, so `GetTxPowerState` reports the software
+  shadow (`hw_readback=false`).
+- **Every 5G central channel gets a defined AGC table, fc and (8822B) RF
+  0xBE** (`agc_table_5g` / `cfo_fc_5g` / `rf_be_for_8822b`, full and fast
+  paths). Gap 65..99: AGC table 1, 2 from central 80 on the 8822B (1
+  through 99 on the 8821C), fc 0x453, RF 0xBE from the vendor's 12-channel
+  cycle. One 8812BU, 40 MHz, fixed gain: the floor at 5350 / 5450 MHz
+  spreads 0.4 / 0.7 dB by predecessor, against 0.8 dB for an in-table
+  control (5310): unresolved, not zero. The filled RF 0xBE values are
+  untested (a stale one showed nothing below ~1.5 dB). On a second
+  8812BU-class unit the full path's canary registers at four filled
+  targets (20/40 MHz) match across two predecessors each. Full-vs-fast
+  canary parity (RX-only) holds across the gap at 20/40 MHz on both units
+  and at 80 MHz on the second. `fast_retune` keeps the 20 MHz DFS CCA
+  tweak in `0x838[7:4]` in step (write-on-change, same cache family) and
+  clears a notch / CSI mask / dsde CCA tweak that a full set's
+  `spur_calibration` or the `DEVOURER_RX_NBI` / `_CSI_MASK` knobs armed —
+  it never arms one, so a spur channel reached by a fast hop runs
+  un-notched until the next full set (8822BU: 83 dwells at 20 MHz over
+  36..165 incl. 52/64/100/117/144 and 66 at 40 MHz with zero fast-vs-full
+  differences; the knob-armed registers 0x874/0x87c/0x880 and 0xc20/0xe20
+  [28] read clear on the hop target; on a day the PSD at 5760 MHz crossed
+  threshold, the full path armed the dsde CCA tweak in `0x82c` on every
+  40 MHz set at ch153 and a fast hop onto 153 carried none, 10/10 dwells —
+  the asymmetry above, measured). A firmware hop
+  invalidates these write-on-change caches, same-band hops included. The
+  firmware also writes its own `0x838` CCA word during the switch (on ch52
+  at 20 MHz `0x86666341`, where the vendor driver and the full path land
+  `0x86666351`), so the fw hop re-applies the DFS nibble 1 ms after the
+  H2C: written straight after it the host's word loses to the firmware's,
+  at 1 ms it holds (8822BU, 36 -> 52, 3/3 at 1, 2 and 3 ms; `0x82c` /
+  `0x830` the firmware leaves alone). Host-side cost only, dead air is
+  the firmware's. The 8821C is untested.
+- **Firmware channel switch** (H2C 0x1D `SINGLE_CHANNELSWITCH_V2`,
+  `fw_channel_switch` + the `fastretune_fw` knob; both Jaguar2 dies — the
+  path is variant-generic, 8822B on-air-validated, 8821C code-covered
+  pending hardware): the fw executes the whole
+  retune in ~1–2 ms and reports C2H `CUR_CHANNEL`. Never poll RF18 *during*
+  the switch — the PI reads contend with the firmware's RF-bus writes and
+  triple the on-air dark time; confirm the previous switch at the next hop
+  instead (`fw_switch_confirm`). Classic 8-byte H2Cs ride the HMEBOX
+  mailboxes (0x1d0/0x1f0 + 0x1cc busy bits), distinct from MacInit's 32-byte
+  h2c-pkt queue.
+- **The whole MAC must be enabled before the LLT init** (`MAC_TRX_ENABLE =
+  0xFF`, halmac's value for both 8822B and 8821C; this port had the DMA-only
+  `0x0F`). The same defect and fix as Jaguar3 (`src/jaguar3/CLAUDE.md`, where
+  `0x1F` - the DMA bits + PROTOCOL_EN - was enough on the 8822C; not
+  bisected here). On an 8812BU (`rsvd_boundary` 1938 too): with `0x0F`, 4000
+  frames injected with a beacon armed overwrote page 1938 and latched
+  `TXDMA_STATUS` `0x10` then `0x15` (bits not decoded; the TBTT trigger was
+  bisected on the 8822C only) at 358 frames, then every bulk-OUT timed out;
+  with `0xFF`, 4000/4000 clean and `LLT[1937] = 0` by the end of the run.
+  The 8821C and the PCIe 8821CE ride the same constant and are unverified.
+- **Runtime threads must survive a failed register read** (the guards: the
+  DIG / thermal-track loops in `RtlJaguar2Device.cpp`). Before them, an
+  uncaught `rtw_read: iostream error` in the DIG thread terminated an 8812BU AP
+  mid-way through a 14-20 Mbit/s uplink, and the guard has fired about once
+  per throughput ladder since - it is a recurring event, not a one-off.
+  Measured on the caller side too: under a 4+4 Mbit/s 8812BU AP soak about
+  one control read a minute failed while the chip worked on, and an unguarded
+  `GetTxDmaStatus` poll killed that AP at minute 9. The poller contract is at
+  `IRtlRadio::GetTxDmaStatus`.
+- **Under co-channel saturation, a failed 8812BU register read is the device
+  stalling the request.** One 8812BU at USB 3, ch 149 HT40+, an 8812EU 50 cm
+  away injecting MCS1/40 at saturation (-10 dB offset, ~1.8k frames/s, CLM
+  busy ~83%): every failure is `LIBUSB_ERROR_PIPE` in ~100 µs - no
+  timeouts, no reads slower than 5 ms - on every address sampled (MAC
+  0x0100, BB config 0x9a4/0xa2c/0xb58/0xc50, BB report 0xf08/0xf48, the RF
+  window 0x2908). With DIG plus a 1 s busy window and thermal poll that is
+  1-6 failures per 90 s run; adding a 5 ms busy window and 50 ms thermal
+  poll, 23-26 per 60 s. An immediate re-read, from a throwaway probe patch that is
+  not in the tree, succeeded 6/6 in one 90 s run. Nothing retries: neither
+  `UsbTransport::ctrl_read` nor, by default, the vendor driver
+  (`MAX_USBCTRL_VENDORREQ_TIMES` is 1 without `CONFIG_VENDOR_REQ_RETRY`).
+  Counterparts: zero failures in 45 s with the injector off (ambient, busy
+  ~2%); one in 60 s at MCS5/40 (busy ~68%); zero in 60 s each at MCS1/20
+  and 6M/20 - but the 40 MHz witness's CLM read those at only 6% / 29% busy,
+  so 20 vs 40 MHz and airtime are not separated. The vendor's 0x4E0 write
+  after an always-on-section access (`usbctrl_vendorreq`, rtw88
+  `rtw_usb_reg_sec`) is not ported and was not tested as a cause.
+
+## TX power
+
+Per-rate indices are computed in software and written 4 rates per dword into
+`0x1d00` (path A) / `0x1d80` (path B). Two shapes feed that block: the 8821C's
+programmed-efuse vendor formula (`base + (min(by_rate, lmt) - rs)`) and the
+shared efuse walk both variants use otherwise.
+
+A caller table (`SetTxPowerRateDiffs`) replaces either shape via
+`write_txagc_diffs`, anchored on the HT 1SS section index taken **pre-offset
+and pre-rail** — clamping the anchor first would rebuild the shape off a
+saturated base. Resolution is the family's 0.5 dB step. Rows the table does not
+describe (MCS8-15, VHT) are written explicitly AT the anchor rather than left
+alone, because the previous apply left per-section-distinct values there. On an
+unprogrammed EFUSE there is no baseline to anchor on: that path warns loudly
+and leaves TXAGC at the BB-table default rather than silently flattening.
+
+`SetMonitorChannel` and a cross-band `FastRetune` re-apply only when a knob is
+active — the table counts as one, or a channel change would silently revert to
+the calibrated shape.
+
+## Per-packet TX power
+
+The 8822B/8821C descriptor `TXPWR_OFSET` is a hardware LUT
+(0/-3/-7/-11/+3/+6 dB); session default via `SetTxPacketPowerStep`.
+
+## CCX energy sensing (`clm` / `nhm_env`)
+
+**`Stop()` forgets any armed busy window** — the rule, and the residual it
+does not close, are at `IRadio::ArmChannelBusy`, the one declaration site
+where they can be kept true. What is specific to this die:
+
+Measured on an RTL8822BU with the reset removed: arm, `Stop()`, retune, read
+reports `spoil=retuned`; with it, `spoil=none`. Note this `Stop()` does NOT
+tear the chip down — it only joins `stop_pwrtrack()`/`stop_dig()` — so after
+the reset the sampled path still answers, with a live 2 ms window. That is
+why the on-air `revive` arm asserts the spoil REASON rather than the reading's
+validity: asserting "invalid" would encode another family's teardown depth as
+a contract and fail this one. Neither joined thread takes the CCX lock.
+
+`GetRxEnergy(with_nhm=true)` runs the shared CCX window (`src/NhmReader.h`) on
+the 11AC register map; on-air validated on an RTL8822BU.
+
+**`nhm_env` is blind to a steady interferer here, and `dig_step()` is why.** The
+NHM thresholds are referenced to the live IGI, and this generation's DIG window
+spans `0x1c`–`0x3e` — 34 steps — and runs unconditionally. Under a 5 MHz
+non-802.11 carrier it walked IGI 28 → 40, taking the thresholds with it: the
+histogram stayed parked at bucket 2 and `nhm_env` separated by **0** across
+repetitions ("within noise") against an interferer that moved `fa_ofdm` 0 → 318.
+`clm` still separated, but only 0 → 4. Narrowing this window, or pinning IGI
+across the NHM window, is the fix — both are constants in our own code.
+
+The quiet-channel half does work: `[0,0,255,0,…]` reduces to `busy` 100 /
+`ratio` 100 / **`env` 0**, which is the defect `ChannelScore.cpp` cites (by
+name, on this chip) as its reason for excluding NHM from scoring.
+
+In a **TX session** every counter including `clm` pins at zero with a carrier
+present that the same adapter measures fine in RX — so CLM does not unblock
+TX-side sensing here, and dying alongside FA/CCA points at a shared counter/CCX
+enable the TX bring-up never sets rather than at the DIG loop.

@@ -1,0 +1,36 @@
+# CMake and local build outputs
+/build/
+/build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Project-local toolchains and downloaded packages
+/vendor/.local-deps/
+/vendor/.venv/
+/vendor/devourer/build/
+/vendor/devourer/build-*/
+/vendor/devourer/.git/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated binaries and runtime data
+/wifi_sense
+/wifi_tests
+*.log
+*.tmp
+*.pcap
+*.bin
+*.jsonl
+*.npy
+*.npz
+
+# Keep checked-in sample data; ignore future generated CSVs elsewhere
+*.csv
+!/data/
+!/data/*.csv

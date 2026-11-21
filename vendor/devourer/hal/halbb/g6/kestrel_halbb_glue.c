@@ -1,0 +1,354 @@
+/* C glue: owns a bb_info and drives the vendored halbb-G6 BB functions for
+ * both Kestrel chips. Compiled as C behind the shim (hal/halbb/
+ * hal_headers_le.h). See the header. */
+#include "halbb_precomp.h"      /* full bb_info + halbb types + BB functions */
+#include "kestrel_halbb_glue.h"
+#include "vendor/halbb_edcca_ex.h"
+#include "vendor/halbb_auto_dbg.h"
+
+struct kestrel_halbb_ctx {
+  struct bb_info bb;
+  struct rtw_hal_com_t hal;
+  struct rtw_phl_com_t phl;
+  struct bb_cmn_info cmn;
+  int env_mntr_ready; /* lazy halbb_env_mntr init done */
+  int edcca_inited;
+  int edcca_cr_inited;
+  /* The BB table's EDCCA threshold CRs, captured before the first park so a
+   * later 2.4 GHz tune can put them back (level_p, level, ppdu, dwn, obss). */
+  int edcca_table_saved;
+  int edcca_parked;
+  unsigned int edcca_table[5];
+};
+
+struct kestrel_halbb_ctx *kestrel_halbb_create(struct kestrel_halbb_bridge *br,
+                                               enum kestrel_chip chip,
+                                               unsigned char cut,
+                                               unsigned char rfe_type) {
+  struct kestrel_halbb_ctx *c =
+      (struct kestrel_halbb_ctx *)malloc(sizeof(struct kestrel_halbb_ctx));
+  if (!c)
+    return 0;
+  _os_mem_set(0, c, 0, sizeof(*c));
+
+  c->hal.drv_priv = br;          /* -> kestrel_halbb_bridge (register plane) */
+  c->hal.cv = cut;
+  c->phl.dev_cap.rfe_type = rfe_type;
+
+  c->bb.hal_com = &c->hal;
+  c->bb.phl_com = &c->phl;
+  c->bb.bb_cmn_hooker = &c->cmn;
+  c->bb.bb_phy_idx = HW_PHY_0;
+  if (chip == KESTREL_CHIP_8852B) {
+    c->bb.ic_type = BB_RTL8852B;
+    c->bb.ic_sub_type = BB_IC_SUB_TYPE_8852B_8852B;
+    c->hal.chip_id = CHIP_WIFI6_8852B;
+  } else {
+    c->bb.ic_type = BB_RTL8852C;
+    c->bb.ic_sub_type = BB_IC_SUB_TYPE_8852C_8852C;
+    c->hal.chip_id = CHIP_WIFI6_8852C;
+  }
+  c->bb.rx_path = RF_PATH_AB;
+  /* Both supported dies are 2SS / 2 RF paths. The vendor derives these in
+   * halbb_cmn_info_self_init from ic_type; the minimal bring-up must set them
+   * itself — halbb_physts_parsing_init shifts a
+   * halbb_gen_mask_from_0(num_rf_path) into the physts IE04..07 bits, so a
+   * zero here silently disables the per-path IE pages (per-antenna SNR/EVM). */
+  c->bb.num_rf_path = 2;
+  c->bb.num_tx_path = 2;
+  c->bb.num_ss = 2;
+  /* CR bank, as halbb_hw_cfg's own ic_type test picks it (halbb_init.c):
+   * the 8852B is a BB_IC_AX_CLIENT part (BB_CLIENT, the _C register names),
+   * the 8852C is BB_IC_AX_AP2 (BB_AP2, the _A2 names). The EDCCA, DIG,
+   * physts and env-monitor CR tables all switch on this; a wrong bank writes
+   * another die's addresses (the 8852C EDCCA level is 0x4840, the client
+   * bank's 0x4884 is nothing there). Without any bank the env-monitor CR-init
+   * switch falls through and the NHM ready-bit address stays 0. */
+  c->bb.cr_type = (chip == KESTREL_CHIP_8852B) ? BB_CLIENT : BB_AP2;
+  c->bb.bb0_cr_offset = 0;       /* bridge adds the BB window (wIndex=1) */
+  /* halbb_init_cr_default guards on this flag; it asserts exactly the wiring
+   * done above (hal_com/phl_com/bb_cmn_hooker present). */
+  c->bb.bb_cmn_info_init_ready = true;
+  br->bb_info = &c->bb; /* halrf's cross-plane rtw_hal_bb_* calls (shim) */
+  return c;
+}
+
+/* Apply the built-in BB register table + load the gain table + the efuse RX
+ * gain offsets — the vendor's own loader flow (halbb_init_reg ->
+ * halbb_init_cr_default + halbb_init_gain_table + halbb_get_efuse_ofst_init),
+ * walking the vendored hwimg arrays with the vendor's check-positive engine.
+ * Returns nonzero on success. */
+int kestrel_halbb_init_reg(struct kestrel_halbb_ctx *ctx) {
+  if (!ctx)
+    return 0;
+  return halbb_init_reg(&ctx->bb) ? 1 : 0;
+}
+
+void kestrel_halbb_rx_bringup(struct kestrel_halbb_ctx *ctx) {
+  if (!ctx)
+    return;
+  struct bb_info *bb = &ctx->bb;
+  /* The gain cache (bb_gain_i) is populated by kestrel_halbb_init_reg's
+   * halbb_init_gain_table; this entry owns the front-end routing + chains. */
+  /* LNAON / TRSW / PAPE RF-front-end routing (the both-bands deafness fix on
+   * the 8852C). Vendor core dispatcher — per-chip via ic_type. */
+  halbb_gpio_setting_init(bb);
+  /* Enable both RX chains (rx_path_en). Vendor core dispatcher; its 8852C
+   * case passes hal_com->dbcc_en (0 here) — same as the direct call did. */
+  halbb_ctrl_rx_path(bb, RF_PATH_AB, HW_PHY_0);
+
+  /* 8852C physts MEASUREMENT bring-up. Devourer's minimal halbb bring-up runs
+   * only halbb_init_reg (BB table) + this, skipping the vendor's
+   * halbb_dm_init_per_phy measurement inits. On the 8852B the physts engine
+   * fills reports anyway (its table covers it); on the 8852C the reports arrive
+   * EMPTY (is_valid=0) without these — halbb_ic_hw_setting_init_8852c sets the
+   * BB evm/measurement report-enable (0xa10[0]), and the physts CR map + IE
+   * bitmap must be programmed for the engine to snapshot RSSI/SNR/EVM. */
+#ifdef BB_8852C_SUPPORT
+  if (bb->ic_type == BB_RTL8852C) {
+    halbb_ic_hw_setting_init_8852c(bb); /* 0xa10[0] evm/measurement rpt-en */
+    halbb_cr_cfg_physts_init(bb);
+    halbb_physts_parsing_init(bb);
+  }
+#endif
+}
+
+void kestrel_halbb_set_gain(struct kestrel_halbb_ctx *ctx, unsigned char central_ch,
+                            unsigned char band_type) {
+  if (!ctx)
+    return;
+  struct bb_info *bb = &ctx->bb;
+  if (bb->ic_type == BB_RTL8852B) {
+#ifdef BB_8852B_SUPPORT
+    /* The 8852B loader applies both paths in one call (no efem arg). */
+    halbb_set_gain_error_8852b(bb, central_ch, (enum band_type)band_type);
+#endif
+  } else {
+#ifdef BB_8852C_SUPPORT
+    /* is_efem=false (compact USB dongle, no external LNA). Vendor skips 2.4G
+     * gain-error internally. */
+    halbb_set_gain_error_8852c(bb, central_ch, (enum band_type)band_type,
+                               false, RF_PATH_A);
+    halbb_set_gain_error_8852c(bb, central_ch, (enum band_type)band_type,
+                               false, RF_PATH_B);
+#endif
+  }
+}
+
+void kestrel_halbb_ctrl_bw_ch(struct kestrel_halbb_ctx *ctx, unsigned char pri_ch,
+                              unsigned char central_ch, unsigned char bw,
+                              unsigned char band_type) {
+  if (!ctx)
+    return;
+  /* Vendor core dispatcher (halbb_api.c): its per-chip case forwards to
+   * halbb_ctrl_bw_ch_<chip> with these exact arguments (seg1 is 80+80-only,
+   * unused on both chips). */
+  halbb_ctrl_bw_ch(&ctx->bb, pri_ch, central_ch, /*central_ch_seg1=*/0,
+                   (enum band_type)band_type, (enum channel_width)bw,
+                   HW_PHY_0);
+}
+
+/* halbb_edcca.c (and halbb_dig.c) call the auto-diagnostic notifier from
+ * halbb_auto_dbg.c, which is not vendored here: a no-op keeps the EDCCA
+ * object linkable on toolchains that do not drop unreferenced sections
+ * (MinGW); on ELF/--gc-sections the call sites were discarded anyway. */
+void halbb_diagnostic_event_notify(struct bb_info *bb, enum habb_fun_t type,
+                                   u8 sub_type) {
+  (void)bb;
+  (void)type;
+  (void)sub_type;
+}
+
+/* EDCCA energy-detect threshold for a 6 GHz tune (halbb_edcca.c), via the
+ * vendor's own threshold calc. 2.4/5 GHz keep the BB table default (level
+ * 66 = -62 dBm high, -70 dBm low) the 8852C carrier-sense TX default was
+ * measured with. On 6 GHz that default latches the MAC EDCCA gate busy and
+ * every injected frame defers: the BB's EDCCA pwdB reads the receiver's own
+ * floor at -67..-69 dBm on every 8852C in the lab, on both bands, with no
+ * DIG running — inside the default's hysteresis band, and above the vendor's
+ * regulatory CBP threshold for 6 GHz (CBP_6G = 53, -75 dBm) outright. The
+ * vendor applies that regulatory threshold only under a chplan that demands
+ * it; its mode for an unassociated device is EDCCA_NORMAL_MODE, whose
+ * threshold is EDCCA_MAX (never busy) while not linked — that is what is
+ * programmed here, so 5 and 6 GHz TX defer on the preamble carrier sense
+ * (primary CCA, still on) and not on the uncalibrated energy floor. The
+ * regulatory energy-detect levels for those bands are therefore not enforced
+ * by this driver.
+ * First call fills the EDCCA CR table (a vendor dm_init stage the minimal
+ * bring-up skips — without it every address is 0/mask 0 and writes land
+ * nowhere), the per-chip cap defaults and the one-shot init. */
+void kestrel_halbb_edcca_park(struct kestrel_halbb_ctx *ctx, unsigned char band_type,
+                              unsigned char bw) {
+  if (!ctx)
+    return;
+  struct bb_info *bb = &ctx->bb;
+  struct rtw_chan_def *cd = &bb->hal_com->band[0].cur_chandef;
+  cd->band = band_type == 2 ? BAND_ON_6G : band_type == 1 ? BAND_ON_5G : BAND_ON_24G;
+  cd->bw = (enum channel_width)bw;
+  if (!ctx->edcca_inited) {
+    if (!ctx->edcca_cr_inited) {
+      halbb_cr_cfg_edcca_init(bb);
+      ctx->edcca_cr_inited = 1;
+    }
+    halbb_edcca_dev_hw_cap(bb);
+    /* hal_cap.c copies the hw caps into the dev caps halbb_edcca_init reads
+     * (there is no sw override here). */
+    bb->phl_com->dev_cap.edcca_cap = bb->hal_com->dev_hw_cap.edcca_cap;
+    bb->phl_com->edcca_mode = EDCCA_NORMAL_MODE;
+    halbb_edcca_init(bb);
+    ctx->edcca_inited = 1;
+  }
+  if (!ctx->edcca_table_saved) {
+    struct bb_edcca_cr_info *cr = &bb->bb_cmn_hooker->bb_edcca_cr_i;
+    ctx->edcca_table[0] = halbb_get_reg_curr_phy(bb, cr->r_edcca_level_p, cr->r_edcca_level_p_m);
+    ctx->edcca_table[1] = halbb_get_reg_curr_phy(bb, cr->r_edcca_level, cr->r_edcca_level_m);
+    ctx->edcca_table[2] = halbb_get_reg_curr_phy(bb, cr->r_ppdu_level, cr->r_ppdu_level_m);
+    ctx->edcca_table[3] = halbb_get_reg_curr_phy(bb, cr->r_dwn_level, cr->r_dwn_level_m);
+    ctx->edcca_table[4] = halbb_get_reg_curr_phy(bb, cr->r_obss_level, cr->r_obss_level_m);
+    ctx->edcca_table_saved = 1;
+  }
+  bb->bb_edcca_i.edcca_mode = EDCCA_NORMAL_MODE;
+  bb->bb_link_i.is_linked = false; /* the unlinked branch: th_h = EDCCA_MAX */
+  halbb_edcca_thre_calc(bb);
+  ctx->edcca_parked = 1;
+}
+
+/* A 2.4 GHz tune after a parked 5/6 GHz one: put the BB table's threshold
+ * CRs back (the park rewrote them in place and nothing else does), so 2.4 GHz
+ * keeps the table level its carrier-sense measurement was taken with. Returns
+ * 1 when it restored something. */
+int kestrel_halbb_edcca_restore(struct kestrel_halbb_ctx *ctx, unsigned char bw) {
+  if (!ctx || !ctx->edcca_parked)
+    return 0;
+  struct bb_info *bb = &ctx->bb;
+  struct bb_edcca_cr_info *cr = &bb->bb_cmn_hooker->bb_edcca_cr_i;
+  struct rtw_chan_def *cd = &bb->hal_com->band[0].cur_chandef;
+  cd->band = BAND_ON_24G;
+  cd->bw = (enum channel_width)bw;
+  halbb_set_reg_curr_phy(bb, cr->r_edcca_level_p, cr->r_edcca_level_p_m, ctx->edcca_table[0]);
+  halbb_set_reg_curr_phy(bb, cr->r_edcca_level, cr->r_edcca_level_m, ctx->edcca_table[1]);
+  halbb_set_reg_curr_phy(bb, cr->r_ppdu_level, cr->r_ppdu_level_m, ctx->edcca_table[2]);
+  halbb_set_reg_curr_phy(bb, cr->r_dwn_level, cr->r_dwn_level_m, ctx->edcca_table[3]);
+  halbb_set_reg_curr_phy(bb, cr->r_obss_level, cr->r_obss_level_m, ctx->edcca_table[4]);
+  ctx->edcca_parked = 0;
+  return 1;
+}
+
+/* The EDCCA level CR as programmed (the table's 66 = -62 dBm, or the parked
+ * EDCCA_MAX), for the tune log. */
+unsigned int kestrel_halbb_edcca_level(struct kestrel_halbb_ctx *ctx) {
+  if (!ctx)
+    return 0;
+  struct bb_info *bb = &ctx->bb;
+  if (!ctx->edcca_cr_inited) {
+    halbb_cr_cfg_edcca_init(bb);
+    ctx->edcca_cr_inited = 1;
+  }
+  struct bb_edcca_cr_info *cr = &bb->bb_cmn_hooker->bb_edcca_cr_i;
+  return halbb_get_reg_curr_phy(bb, cr->r_edcca_level, cr->r_edcca_level_m);
+}
+
+/* One EDCCA hardware report (halbb_edcca_get_result): out[0..2] = pwdB of the
+ * full band / primary 20 / secondary 20 (dBm, s8), out[3..5] = the matching
+ * busy flags, out[6..7] = per-path pwdB 0/1. Diagnostic for a band where the
+ * MAC EDCCA gate defers: it answers "what level does the BB see against the
+ * threshold it was given". */
+void kestrel_halbb_edcca_report(struct kestrel_halbb_ctx *ctx, int out[8]) {
+  if (!ctx)
+    return;
+  struct bb_info *bb = &ctx->bb;
+  if (!ctx->edcca_cr_inited) {
+    halbb_cr_cfg_edcca_init(bb);
+    ctx->edcca_cr_inited = 1;
+  }
+  halbb_edcca_get_result(bb);
+  struct edcca_hw_rpt *r = &bb->bb_edcca_i.edcca_rpt;
+  out[0] = r->pwdb_fb;
+  out[1] = r->pwdb_p20;
+  out[2] = r->pwdb_s20;
+  out[3] = r->flag_fb;
+  out[4] = r->flag_p20;
+  out[5] = r->flag_s20;
+  out[6] = r->pwdb_0;
+  out[7] = r->pwdb_1;
+}
+
+void kestrel_halbb_ctrl_tx_path(struct kestrel_halbb_ctx *ctx) {
+  /* 8852C-only: the 8852B routes TX antennas per-STA via the CMAC antenna
+   * model (TXWD/cctl), there is no path-com block to program. */
+#ifdef BB_8852C_SUPPORT
+  if (ctx && ctx->bb.ic_type == BB_RTL8852C) {
+    halbb_ctrl_tx_path_tmac_8852c(&ctx->bb, RF_PATH_A, false);
+    /* Then take the TX path enable and the path A/B maps from the BB's P-MAC
+     * registers (0x09a4[4:2]) instead of the TX info the MAC sends with each
+     * PPDU: paths A+B, A on IFFT 0, B on IFFT 1, with the vendor's per-path
+     * TSSI reset pulse. The path selection the MAC attaches to a hardware
+     * response (ACK) comes from state nothing initialises on this die: in
+     * some bring-ups it enables only a path the die does not have, or maps
+     * path A off the signal, and the response is composed but never radiated
+     * (docs/kestrel-ack-responder.md). The switch applies to every PPDU;
+     * injection was measured unchanged for 1SS only. */
+    halbb_ctrl_tx_path_pmac_8852c(&ctx->bb, RF_PATH_AB, false);
+  }
+#else
+  (void)ctx;
+#endif
+}
+
+/* One-shot active/frame-free NHM absolute noise floor. See the header. */
+int kestrel_halbb_env_mntr_nhm(struct kestrel_halbb_ctx *ctx,
+                               unsigned short mntr_time_ms,
+                               signed char *nhm_pwr_dbm) {
+  struct bb_info *bb;
+  struct ccx_para_info para;
+  struct env_trig_rpt trig;
+  struct env_mntr_rpt rpt;
+  void *drv;
+  u16 mtime;
+  int i;
+
+  if (!ctx || !nhm_pwr_dbm)
+    return 0;
+  bb = &ctx->bb;
+  drv = bb->hal_com->drv_priv;
+  mtime = mntr_time_ms ? mntr_time_ms : 100;
+
+  /* Lazy env-monitor init: the RX bring-up flow (kestrel_halbb_init_reg) only
+   * runs halbb_init_reg, so the NHM CR addresses (incl. nhm_rdy) and the ccx/nhm
+   * state are still zero. Run the two vendor inits once before the first
+   * trigger. */
+  if (!ctx->env_mntr_ready) {
+    halbb_cr_cfg_env_mntr_init(bb);
+    halbb_env_mntr_init(bb);
+    ctx->env_mntr_ready = 1;
+  }
+
+  /* One-shot NHM in the vendor's IEEE-11k idle-noise mode. A zeroed para gives
+   * nhm_incld_cca=NHM_EXCLUDE_CCA + nav/rssi gating DISABLED (all enum 0). */
+  _os_mem_set(0, &para, 0, sizeof(para));
+  para.rac_lv = RAC_LV_4;      /* debug priority: always wins the racing arbiter */
+  para.mntr_time = mtime;      /* ms; drives ccx_period (must be nonzero) */
+  para.nhm_app = NHM_DBG_11K;  /* 802.11k noise-floor thresholds */
+
+  if (!(halbb_env_mntr_trigger(bb, &para, &trig, HW_PHY_0) & NHM_SUCCESS))
+    return 0;
+
+  /* The measurement runs mntr_time in HW; wait the window, then poll the ready
+   * bit (halbb_env_mntr_result returns NHM_SUCCESS once nhm_rdy is set). */
+  _os_delay_ms(drv, mtime);
+  for (i = 0; i < 8; ++i) {
+    _os_mem_set(0, &rpt, 0, sizeof(rpt));
+    if ((halbb_env_mntr_result(bb, &rpt, HW_PHY_0) & NHM_SUCCESS) &&
+        rpt.nhm_pwr != ENV_MNTR_FAIL_BYTE) {
+      *nhm_pwr_dbm = (signed char)((int)rpt.nhm_pwr - 110); /* 110+x dBm */
+      return 1;
+    }
+    _os_delay_ms(drv, 3);
+  }
+  return 0;
+}
+
+void kestrel_halbb_destroy(struct kestrel_halbb_ctx *ctx) {
+  if (ctx)
+    free(ctx);
+}

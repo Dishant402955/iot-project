@@ -1,0 +1,394 @@
+# src/kestrel/ — Kestrel (RTL8852, Wi-Fi 6) working context
+
+Deep per-generation facts for this subtree, loaded alongside the root
+CLAUDE.md. Chips: RTL8852BU/8832BU (variant C8852B) and RTL8852CU/8832CU
+(C8852C), one HAL serving both dies on all platforms (MSVC included).
+
+## Two-plane architecture
+
+The **mac_ax plane** (power-on / FWDL / efuse / MAC TRX / H2C-C2H / USB /
+descriptors) is hand-ported C++ from Realtek's "G6 phl" vendor trees
+(`reference/rtl8852bu`, `reference/rtl8852cu` — none of the 11ac
+loaders/parsers apply). The **BB/RF plane is Realtek's halbb/halrf C compiled
+VERBATIM** for both chips: one chip-agnostic core + per-chip backends under
+`hal/halbb/g6/` + `hal/halrf/g6/` (`vendor/` = untouched vendor files;
+`shim/` + `hal_headers_le.h` = the minimal PHL surface they compile against;
+`kestrel_halbb_glue.c` / `kestrel_halrf_glue.c` = the C entry points devourer
+drives; `tools/vendor_hal{bb,rf}_*.sh` re-vendor).
+
+The vendored loaders own the BB/RF/gain tables (`halbb_init_reg`,
+`halrf_config_radio` — radio pages reach the fw via the bridge `send_h2c`
+into the mac_ax H2C encoder), the per-channel BB config (`halbb_ctrl_bw_ch`),
+the RF tune (`halrf_ctl_ch/bw` on the B, `halrf_ctl_band_ch_bw_8852c` on the
+C), and the cals: DACK + RX-DCK both dies (wrapped in an RF 0x0/0x1/0x5
+save/restore on the B — the vendor relies on later TRX flow to rewrite them),
+IQK on the 8852C only. The RFK prologue (NCTL microcode / a-die SI reset /
+LCK / RCK / efuse trim + TSSI DE) runs at `phy_bb_rf_init` in the vendor's
+`halrf_dm_init` position — that position is load-bearing: run after the tune,
+the SI reset deafens the radio both ways. **Evidence-gated cals**: TSSI/DPK
+(both dies, via `support_ability`) and IQK on the 8852B degrade TX under the
+fixed-dBm power model — gates fall with a TSSI-referenced power model.
+
+## Dispatch and cold boot
+
+Dispatched **PID-first** (`kestrel/KestrelUsbIds.h`), not from the 0x00FC
+byte: on AX silicon that register is R_AX_SYS_CHIPINFO (die-id 0x51/0x52; the
+8852A's 0x50 collides with the 8822B cold transient). Cold-boot facts (mac_ax
+plane, both dies): a USB chip from real cold reads WLMAC_PWR_STE=MAC_ON (its
+AFSM auto-powers to enumerate) and power_on must force the MAC off first
+(`pwr.c` prologue) or the bootrom never raises H2C_PATH_RDY; `B_AX_ENBT` must
+be set before any LTE-space access (arms the LTE indirect interface) and the
+GNT arbitration is SW-forced to WiFi (`mac_cfg_gnt_8852b` stance) — a kernel
+driver pre-initializing the chip masks all of this, so blacklist rtw89 when
+testing.
+
+USB open: Kestrel adapters skip the pre-claim `libusb_reset_device`
+unconditionally (`claim_interface_then_reset` guard): `power_on` forces the
+MAC off from any retained state, while a USB reset on running firmware drops
+the chip to ROM — a stale-handle re-enumeration that can land in the dead
+ZeroCD DISK id (`0bda:1a2b`).
+
+Bring-up drains the USB bulk-IN from `intf_init` on and checks for a halted
+firmware at its end; do not move the drain later (8852C quirk,
+`docs/8852c-quirks.md`).
+
+## Validated capability surface
+
+On-air-validated: monitor RX (both dies, 2.4/5 GHz; the RX front-end needs
+the halbb per-band LNA/TIA gain-error cache, without which 5 GHz is deaf), TX
+(mgmt injection — the OpenIPC video path via `streamtx`; legacy/HT/VHT/HE
+rates), channel/BW **5/10/20/40/80 MHz on both dies + 160 MHz on the 8852C**
+(the 8852B die has no 160 MHz — vendor bw_sup; caps report accordingly).
+40 MHz tunes to the block center (primary ±2); 80/160 MHz derive the center
+from the channel plan (160 = an 8-wide block, center = block_start+14).
+Every tune also programs the MAC side of the width (`mac_set_bw_txsc`, as
+rtw89 `rtw8852c_set_channel_mac`): `R_AX_WMAC_RFMOD` and the TX sub-carrier
+indices in `R_AX_TX_SUB_CARRIER_VALUE` (`rtw89_phy_get_txsc`). Without them a
+PPDU narrower than the channel — 20 MHz on an 80 MHz channel — airs at the
+block center and nothing on the primary hears it (an iPhone on ch149 never
+saw an 8852C tuned 149/80 until they were written). The wide-channel TX
+validation above injected PPDUs as wide as the channel, which do not use the
+index, so it could not catch this. On-air A/B, txdemo 6M beacons from a DUT
+tuned wide, rxdemo at 20 MHz on the primary, 500 frames a cell: before, 0 on
+every cell of both dies (8852C 149/40, 153/40, 149/80, 161/80, 36/160; 8852B
+the same minus 160); after, 400+ on every cell; a 20 MHz control 400+ both.
+`halbb_ctrl_bw_ch`'s `pri_ch` argument is the primary **channel number**, not a
+sub-band index (vendor phl passes `rtw_chan_def::chan` through unchanged): the
+vendor derives the 0x4978[11:8] sub-band index from `pri_ch` vs `central_ch`,
+indexes the 2.4 GHz CCK SCO threshold tables with `pri_ch - 1`, and places the
+NBI spur notch from it. All three are RX-side — feeding it an index costs CCK
+reception and all >20 MHz reception while TX is unaffected, so an SDR duty
+check cannot see it (`tests/kestrel_prich_onair.sh`). **6 GHz TX tops out at 80 MHz**: the 6G 160 MHz TX does not
+radiate on the C8852C (the RF synth locks and RX-160 works, but the 6G+160
+TX-enable path is un-ported — B210-confirmed 0% duty vs 45% at 6G-80 / 40% at
+5G-160; a MAC TXAGC-max / RF-TX-path gap, not a chip limit — the vendor
+drives it). 5/10 MHz narrowband is the BB "small BW" field with the RF left
+in 20 MHz mode (no ADC re-clock, unlike Jaguar). RX bulk-IN delivery requires
+the USB RXAGG engine enabled (`B_AX_RXAGG_EN`). TX carrier-sense
+defaults are per-die (8852C enabled / 8852B cleared-and-warned pending its
+measurement arm) — the numbers and knob interplay live at the bring-up
+comment in `RtlKestrelDevice.cpp` and the gate doc in `MacRegAx.h`;
+harness: `tests/kestrel_cca_default_check.sh`. `ReadTsf` reads the per-port MAC TSF;
+`StartBeacon` drives the AX HW beacon engine.
+
+**Per-frame retry limit** (`DEVOURER_TX_RETRY_LIMIT`): the AX WD wd_info
+dword1 `DATA_TXCNT_LMT[30:25]` + SEL(31) — NOT a mac_ax H2C (the per-MACID
+CCTRL twin exists but the WD field is the injection-path mechanism). The
+field counts **attempts** (witness-measured on the 8832CU, unACKable-unicast
+copy counts: limit-value 2 → modal 2 copies where the 11ac retries-field
+gives 3; value 0 hardware-clamps to one attempt), so `send_packet` folds +1
+to keep N-means-N-retries across generations. The neighbouring
+`DATA_RTY_LOWEST_RATE` floor field stays unwritten (the 11ac floor-form
+anomaly, `RetryFallback` note in `DeviceConfig.h`). No CCX `tx.report`
+exists on this family — `tests/kestrel_retry_witness.sh` (stamped-pctr copy
+counting on a witness monitor) is the retry ground truth.
+
+**HE ER SU + DCM extended range** (both dies): per-packet via radiotap-HE
+FORMAT=EXT_SU or `DEVOURER_TX_RATE=.../ER[/DCM]`; RX classifies the format in
+`RxAtrib.ppdu_type` (7=HE_SU, 8=HE_ERSU) — `docs/he-extended-range.md`.
+
+**Per-antenna RSSI/SNR/EVM** (physts per-path pages): the RX loop parses the
+whole PPDU-status blob (`kestrel::parse_physts_8852` — 8-byte header rssi_td +
+IE01 avg SNR + IE04/05 path pages) into `RxAtrib.rssi/snr/evm[0..1]` and the
+`GetActiveRxPaths()` window. The IE04..07 pages only appear when
+`halbb_physts_parsing_init` shifts a `num_rf_path` mask into the physts IE
+bitmap — the glue must set `bb.num_rf_path`/`num_ss` itself (its bb_info is
+memset-zeroed; a zero mask silently drops the pages and per-path SNR falls
+back to the IE01-average+RSSI-distance derivation, which shadows the loss —
+the tell is per-path SNR exactly tracking the RSSI split). On-air-validated on
+the C8852C (direct snr_lgy + per-path EVM). The C8852B path is untested on
+air: its bring-up skips `halbb_physts_parsing_init` (physts fills from the BB
+table default), so whether its bitmap includes the path pages — and thus
+whether its per-path EVM is real or 0 — is unmeasured; its per-path SNR is the
+derivation either way (the 8852B BB does not drive snr_lgy — vendor
+`halbb_physts_ie_04_07` chip branch).
+
+Async packet-C2H (bulk-IN rpkt_type=10) delivery works — routed by
+`handle_c2h` on the C2H class/func — so the #236 C2H surface (TWT/F2P
+reports) is reachable. Not working: the fw's USR_TX_RPT TX-egress-timestamp
+C2H (gated on a full BSS association, not just the registered NO_LINK role).
+
+## FastRetune (frequency hopping)
+
+`HalKestrel::fast_retune` is the lean same-band 20 MHz hop: RF channel set +
+a per-sub-band gain re-apply + a BB reset + fixed TX power — skipping the BB
+bandwidth config and the ~1.2 ms RX-DCK. **~9 ms/hop same-sub-band, ~13 ms
+cross-sub-band** (vs ~2 ms on the 8822B, ~44 ms unoptimized). The channel set
+is `fast_rf_channel_8852b`, a **compose-cache write-only** port of the vendored
+`halrf_ctrl_ch_8852b`. Three cuts (all on-air + soak validated):
+
+- **Compose-cache**: the vendored path reads RF18 ×4 (path A/B × DAV 0x18 / DDV
+  0x10018) and RMW-toggles RF 0xcf ×8 every hop; the lean path primes those
+  dwords once per epoch (`_kfr_*`, invalidated by every full `set_channel`) and
+  writes whole dwords — ~12 reads gone.
+- **No DDV writes**: the d-die 0x10018 window is unpopulated on the single-die
+  8852B; skipping it costs no channel accuracy (soak-confirmed).
+- **Relock only on a sub-band bucket change** (`fast_rf_channel_8852b(...,
+  relock)`, `bucket_changed = gain_bucket != _last_gain_bucket`). A
+  same-sub-band hop moves the synth little and it settles during the caller's
+  admission window, so the ~13 ms path-A LCK poll is pure blocking — a plain
+  RF18 write holds channel accuracy (soak: 2000 hops, zero wrong-channel,
+  ~97 % delivery). The full `halrf_set_s0_arfc18` relock (RF 0xd3[8] hold +
+  RF18 write + RF 0xb7[8] LCK poll) + `fast_lck_check_8852b` (RF 0xc5[15]
+  verify + MMD-reset lock recovery) is kept for a sub-band crossing — a bigger
+  VCO jump, and the only path with the recovery. NOTE: the relock guarantees a
+  verified lock, so a `SetMonitorChannel` (full path) always runs it; the fast
+  hop trades that guarantee for latency within a sub-band, empirically safe.
+
+The synth-lock *diagnostic* reads are gated off the hot path
+(`vnd_rf_tune(..., diag=false)`), and the gain-error re-applies only on a
+bucket move. 8852C keeps the vendored `ctl_band_ch_bw` tune
+(`fast_rf_channel_8852b` returns false). No firmware channel-switch H2C exists
+here (H2C 0x1D is 11ac HalMAC; rtw89 has only `SCAN_OFFLOAD` + MCC). The
+dwell-1 / N-channel data plane (`examples/dwelltx`) runs on Kestrel at ~30 ms
+slots (soak: 2000 hops, zero wrong-channel, ~97 % delivery).
+
+Both dies have one shortcut at 80 MHz on 5 GHz: a hop to another channel of
+the **same 80 MHz block** (149 <-> 161 in 149-161) moves no RF, only the
+primary. `fast_set_primary_80` rewrites what `halbb_ctrl_bw_ch_8852{b,c}`
+derives from the primary at 80 MHz — the [11:8] sub-band index (0x4978 on the
+C, 0x49c4 on the B) and the 5 MHz edge mask (`halbb_5m_mask_8852{b,c}`:
+0x4c4c/0x4d10/0x4450[24] on the C, 0x46f8/0x47b8/0x4440[31] on the B, the
+0x4 value on both; the 8852D's 0x5 is not handled) — plus the MAC TX
+sub-carrier, then resets the BB. Median hop **~2.2 ms on the 8852C** (115
+hops, max 2.5 ms) against ~213 ms for the full path, which re-runs the IQK
+this one skips; **~18 ms on the 8852B** against ~145 ms (its register
+round-trips are the slower ones, as above). Measured with an iPhone whose
+AWDL schedule alternates 149/161, on the 8852C: on the full path its 49.5 MB
+transfer spent ~44 s of 49 s deaf; on this one a 50.8 MB transfer took 7.5 s
+with nothing else changed. txdemo alternating 149/161 at 80 MHz (50 frames a
+dwell, 250 on 161) reached an rxdemo witness on 161 at 200+ on both dies,
+fast or full. With the IQK skipped, MAC retries stayed at 2-4% over the
+iPhone sessions — one adapter, one peer, near field — and the fast hop
+relies on the RF center staying put. Register parity against the full path
+(BB 0x0000-0xFFFF incl. the RF window, CMAC 0xC000-0xCFFF; pairs 149/161,
+149/153 and 157/161, 3 full tunes per primary and 12 fast hops each, on each
+die): every register the full path sets per primary matched on all 36 hops
+of each die. The rest that differed either differs between two full tunes
+of the same channel too (SW-SI counters and records, RX counters, AFE status
+outputs, the NCTL/IQK engine's status) or showed on a single hop of six
+(a few undocumented CMAC status words); a missing write would show on every
+hop. Any other wide-channel hop still takes the full path.
+
+### Firmware IO-offload hop (`DEVOURER_KFR_OFLD`, default on)
+
+`fast_retune_ofld_8852b` ships the *entire* same-sub-band hop — the six RF18/
+0xcf channel-set writes, `halbb_bb_reset_all_8852b`, and the fixed-dBm TX-power
+target — as ONE `FW_OFLD`/`CMD_OFLD_REG` H2C (mac_ax `fwofld.c`) the on-chip
+firmware replays locally. `KestrelFw::reg_write_ofld` packs the 16-byte
+`fwcmd_cmd_ofld` command buffer (src RF a-die / BB / MAC, `WRITE`/`DELAY`
+types, LC on the last, `cmd_num` running); the firmware applies each masked
+write as `(reg & ~mask) | ((val << ctz(mask)) & mask)` — so BB/MAC entries
+carry the **raw** field value (pre-shifting double-shifts and mis-tunes),
+while RF writes use the full `MASKRF` (shift 0). This collapses ~20 per-hop USB
+register round-trips into a single bulk-OUT: host-side hop cost **~9.3 ms →
+~0.15 ms (~45×)**, zero wrong-channel over a 6000-hop soak.
+
+The offload does not speed up the RF synth — it only frees the host. The
+direct path's ~5 ms of `bb_reset` USB round-trips incidentally covered the VCO
+settle; collapsing them to ~0.15 ms exposes the true **~1.5 ms synth-settle
+floor** (below it, a frame airs mid-retune → wrong-channel; ≥1.5 ms is clean,
+`DEVOURER_DWELL_SETTLE_US` on the demo). Net time-to-usable-channel ~1.7 ms
+(~5.5×), with the host free to prep the next frame / service RX during the
+settle. The hop returns before the synth settles, so this changes the
+`FastRetune` timing contract — the caller honours the settle (the demos'
+admission window). Default on; `DEVOURER_KFR_OFLD=0` forces the self-pacing
+direct path (for A/B or a suspect chip). A bucket crossing (verified synth
+relock) and the 8852C fall through to the direct steps.
+
+## TX power
+
+A fixed BB dBm (`halbb_set_txpwr_dbm`, default 20 dBm, `DEVOURER_TX_PWR`
+override — whole dBm on this family) with the runtime `SetTxPowerOffsetQdb`
+lever. Per-packet radiotap `DBM_TX_POWER`: no WD-descriptor field exists —
+`send_packet` honours the radiotap delta by rewriting the fixed-dBm BB target
+between frames (2 BB RMWs on value change, free while constant; 0.25 dB
+steps, clamped to the 0..23 dBm PA window around the `DEVOURER_TX_PWR` base;
+global, so a HW beacon airing between frames follows the last-written level;
+a field-less frame restores the `SetTxPowerOffsetQdb` session offset).
+
+**Per-rate diffs** (`SetTxPowerRateDiffs`) ride that same rewrite, because no
+per-rate TXAGC table exists under the fixed-dBm model — this is the only family
+where `GetTxPowerCaps().rate_diffs_hw_table` is false. `send_packet` resolves
+the frame's own MGN rate to its diff and folds it into the target, so a
+fixed-rate stream writes once and then costs nothing while a rate ladder pays
+the 2-RMW rewrite at each change. There is no calibrated shape underneath, so
+"replace the shape" degenerates to "add to the flat session target". Two
+consequences, neither of them papered over: HE and VHT frames carry no diff (the
+caller struct is the CCK / legacy / 1SS-HT ladder), and the target is global, so
+a hardware-timed beacon airing between host frames inherits the last frame's
+rate diff rather than its own rate's. The table is stored as a flat
+`std::atomic<int8_t>[10]` so the TX path reads the one entry it needs without a
+lock — a swap can only split between frames, never within one.
+
+## 8852C vs 8852B divergences
+
+Almost every 8852C divergence is a **`_V1` register-bank** move
+(USB/HFC/RXAGG/HCI at 0x5xxx/0x1700/0x6000/0x7880 vs the 8852B
+0x1xxx/0x8Axx/0x8900/0x8380) plus a different descriptor: FWDL/H2C use a
+16-byte `rxd_short_t` (not the 24-byte WD body), data/mgmt TX uses the
+32-byte `wd_body_t_v1` (not 24), and the RX-descriptor drv_info unit is
+16 bytes (not 8 — `FrameParserKestrel.h`; with the B's unit the C "receives"
+frames with correct lengths but unreadable bodies, i.e. looks deaf to any
+SA-matching harness); the same descriptor widens the RX bandwidth field to
+dword1 [31:29] (rtw89 `AX_RXD_BW_v1_MASK`) — read with the B's [31:30],
+every width came out halved (80 MHz as 40). The CBV-cut die loads the
+`u2_nic` fw image (CAV→u1).
+Two 8852C-specific TX pieces the 8852B path lacks: the BB IFFT→TX-chain
+routing (`halbb_ctrl_tx_path_tmac_8852c`, the 0xD800..0xD82C "path-com" block
+the 8852B replaces with its per-STA CMAC antenna model), and the V1
+descriptor's rate word — `USERATE_SEL`/BW/GI/DATARATE live in wd_body dword7,
+not wd_info dword0 as on the 8852B (mis-placing it left `f_rate=0` so the
+scheduler stalled and the bulk-OUT NAKed). Behavioural quirks beyond the
+`_V1` bank moves (e.g. the frame-free NHM absolute floor is 2.4 GHz-only —
+the firmware DIG biases the 5 GHz idle-noise measurement):
+`docs/8852c-quirks.md`.
+
+## 5 and 6 GHz: EDCCA parked, preamble CCA on
+
+With the carrier-sense TX default, injection on 6 GHz stalled after the first
+frame on every 8852C in the lab (8852CU over USB, both 8852CE over PCIe):
+1/300 delivered with both MAC gates on, 300/300 with only the EDCCA gate
+cleared, 1/300 with only the primary gate cleared (`DEVOURER_CCA_GATES`). The
+BB's own EDCCA report (`kestrel_halbb_edcca_report`, logged at every tune as
+`EDCCA band<n> pwdB ...`) reads the receiver's floor at -67..-69 dBm on every
+radio and both bands — no DIG runs here, so the energy measurement sits where
+the table's gain leaves it. The BB table's EDCCA level is 66 (-62 dBm) with
+an 8 dB hysteresis, so once anything trips it the -67 dBm floor keeps the
+gate busy. On 5 GHz the same floor (-65..-69 dBm on the 8832CU) latches it
+too, and more the higher the channel: with the table level, host injection
+from an 8832CU at a 20 ms gap reached an 8812CU witness at ~50% on ch6/36/44,
+52% on ch52, 21% on ch60, 3% on ch64 and 0 of ~435 frames on ch100/149/157/
+161, with 0.0% SDR airtime on ch161 and the injector stalling on bulk-OUT
+timeouts; clearing the EDCCA gate alone restored ch64-161 to the ch6 rate,
+clearing the primary gate alone restored nothing. The vendor's regulatory
+6 GHz threshold (`CBP_6G` = 53, -75 dBm) is below the floor outright.
+
+What is programmed: at a 5 or 6 GHz tune the glue runs the vendor's EDCCA init
+(`halbb_cr_cfg_edcca_init` — a dm_init stage the minimal bring-up skips,
+without which the EDCCA CR table is all zeros and the writes land nowhere —
+plus `halbb_edcca_dev_hw_cap` and the hw→dev cap copy) and
+`halbb_edcca_thre_calc` in `EDCCA_NORMAL_MODE` with `is_linked = false`,
+which is the vendor's level for an unassociated device: `EDCCA_MAX`, never
+busy. Primary carrier sense (preamble detect) stays on and still defers
+(measured on ch161 after the change: a max-duty 8832CU injector under a
+co-channel MCS1 flood, gates on vs `DEVOURER_DIS_CCA=1`, numbers at the
+bring-up comment in `HalKestrel.cpp`). 2.4 GHz keeps the table default the
+carrier-sense measurement was taken with (floor -82 dBm, busy=0): the glue
+captures the table's threshold CRs before the first park and a 2.4 GHz tune
+after a parked band writes them back (measured: a fresh ch6 tune logs
+`level=66`, a 161->6->161->6 hop session logs 249 on 5 GHz and 66 again on
+each return to ch6, with the ch6 dwells witnessed). The tune log carries the
+programmed level.
+Consequence, stated plainly: this driver does not enforce the 5 GHz or 6 GHz
+energy-detect level the ETSI adaptivity and FCC/ETSI LPI rules call for; the
+caller owns compliance, as everywhere.
+
+Two things fixed on the way that affect every band: the halbb glue now gives
+the 8852C its own CR bank (`BB_AP2`, as `halbb_hw_cfg` picks from the
+ic_type) instead of the 8852B's `BB_CLIENT` — the EDCCA/DIG/physts/env-monitor
+CR tables all switch on it, and the client bank's EDCCA level address is
+nothing on the 8852C; the physts and env-monitor addresses happen to coincide,
+which is why RX never noticed. And `SetCcaGates`/`GetCcaGates` are ported
+(primary = CCA_EN + sec20/40/80, edcca = EDCCA_EN, post-bring-up only).
+
+Validation (ch37, 6M, 800 frames per cell, carrier sense on, same build):
+usb→pcie05 800, pcie05→usb 799, usb→pcie09 800, pcie09→usb 799,
+pcie05→pcie09 800; the 5 GHz matrix re-run beside it: 800 / 752 / 800 /
+791 / 797.
+
+## PCIe (RTL8852CE)
+
+The 8852CE is this HAL over the PCIe transport (`src/PcieDmaAx.cpp` is the
+DMA plane; root CLAUDE.md has the transport picture). Everything the HAL
+does differently on PCIe hangs off `is_usb()`; nothing here is a second HAL:
+
+- **Queue handles are DMA channels.** `KestrelFw` sends FWDL/H2C on handle 12
+  (the FWCMD ring) and `RtlKestrelDevice` injects on 8 (B0MG) / 0 (ACH0)
+  where USB uses the bulk-OUT endpoints; ACH0 is channel 0, so TX-up is its
+  own flag. The descriptors are byte-identical to USB (16-byte `rxd_short_t`
+  for fwcmd, `wd_body_t_v1` + `wd_info` for frames) minus the STF_MODE bit;
+  the plane adds the WD_PAGE bit, wp_info and the addr_info count.
+- **intf_pre_init = `pcie_pre_init`** (rtw89 `mac_pre_init_ax`, 8852C
+  branches): PHY EQ/deglitch/LDO/wake glue, IO-recovery watchdogs, stop the
+  HAXI DMA + idle poll, clear every ring index, mode_op (RXBD_PKT, 256/128 B
+  bursts, 8 tags, 256 ns WD intervals, TRUNC addr-info selects), program the
+  rings via `hci_setup`, reset the BDRAM, re-enable DMA with only CH12 open.
+  **intf_init = `pcie_init`**: LTR (hardware-decided, 500 µs space, 3.2 ms
+  idle timer), every TX channel open, WPDMA/PCIe-IO stops released.
+  **`pcie_deinit`** (LTR off, DMA stopped, indices cleared) runs from `Stop()`
+  or the destructor, whichever comes first — an RX-only session has the RXQ
+  DMA live, and the kernel logged a DMAR write fault into an RX buffer after
+  the one exit that skipped it.
+- **PCIe table rows**: DLE `dle_mem_pcie_8852c` SCC (WDE 64 B × 3328, HIF
+  quota 3228; PLE 128 B × 1904 with the `ple_qt46/47` columns), HFC
+  `hfc_chcfg_pcie_scc_8852c` {13,1614} on all 12 channels (ACH4-7 and the
+  band-1 queues in group 1), public 1614/1614/3228, `hfc_preccfg_pcie` with
+  MODE = POH, the DLFW H2C pre-cost 256; `set_host_rpr` POH (every filter
+  enabled, release-report destination queue POH); `dmac_func_pre_en` DMA
+  mode PCIE_1B; trxcfg's PCIe rows (24 µs pre-backoff AC + non-AC, hardware
+  CTS2SELF, 2 ms PTCL arbiter timeout). RXAGG and the WP-release drain
+  thread are USB-only; release reports arrive on the RPQ and the plane reaps
+  them inside every send and in the RX loop.
+- **Power-on** is `mac_pwr_on_nic_pcie_8852c`: the USB sequence plus
+  PD_REGU_L only when the HCI strap reads PCIE_USB, `0x70[12]` cleared,
+  GPIO16-18 pulled low. EFUSE: the PCIe interface block puts the MAC at 0x400
+  and the PCI vid/did at 0x406/0x408 (self-checking against config space).
+- **PPDU status over PCIe** arrives as its own RXQ packet (rpkt_type 1,
+  typically a 24-byte header-only report or an 80-byte one with the IE
+  pages) between the frames it describes, not prepended inside a bulk
+  aggregate; the cached-physts attach in `StartRxLoop` is bus-neutral and
+  per-path RSSI/EVM/SNR populate at the same rate as on USB. The plane's
+  exit line prints the RXQ packet-type histogram (t0 frames, t1 PPDU status,
+  t10 C2H) — a PCIe receiver with t1=0 has lost its physts, not its frames.
+- **Not ported**: MSI (the plane polls the ring indices, 200 µs), the 8852BE
+  (refused at the factory), the CAV-cut-only `l12_vmain`/`gen2_force_ib` rows
+  (the lab modules are cut 1), and interrupt mitigation.
+
+Validation record (lab box, two RTL8852CE on one J6412: 05:00.0 on a root
+port, 09:00.0 behind an ASM1182e switch with the AER UR mask; witness = a
+TP-Link TX50UH / RTL8832CU on USB in the same chassis; ch 36, 6M, 2000
+frames per cell, `tests/pcie_8852ce_onair.sh`, exact `rx.txhit` counts):
+
+| TX → RX | delivered |
+|---|---|
+| USB → PCIe 05:00.0 | 2000/2000 |
+| PCIe 05:00.0 → USB | 1383/2000 |
+| USB → PCIe 09:00.0 | 1999/2000 |
+| PCIe 09:00.0 → USB | 1980/2000 |
+| PCIe 05:00.0 → PCIe 09:00.0 | 1489/2000 |
+
+Both PCIe receivers are at the ceiling in every run. PCIe-as-transmitter
+is the direction that moves between runs: card 05:00.0 delivered 69 %, 74 %,
+82 % and 97 % to the same witnesses across four runs of the same build,
+card 09:00.0 99 % and 97 % — a spread the probe-repeatability rule in the
+root CLAUDE.md says to measure before reading as a difference between the
+cards. One lab, near field, no SDR: delivery figures for this pair, not a
+link-budget claim.
+
+## Scope
+
+The capstone is 11ax trigger-based UL + TWT (issue #236 — the v1.19 vendor
+fwcmd surface exposes TWT-OFDMA + F2P trigger H2Cs that mainline rtw89
+lacks). The 8852A-family (RTL8832AU) is deliberately excluded (frozen 2021
+v1.15 vendor drop only).
