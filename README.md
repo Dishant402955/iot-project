@@ -6,7 +6,7 @@ Academic research prototype investigating whether a Realtek RTL8821CE 1T1R adapt
 
 **The acquisition pipeline is qualified for the tested setup, but the collected development data does not establish reliable stationary-presence detection.** Do not report a working detector or accuracy claim.
 
-Four interleaved sessions have been collected. Sessions 1, 2 and 4 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
+Five interleaved sessions have been collected. Sessions 1, 2, 4 and 5 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
 
 The frozen nearest-centroid benchmark was evaluated once on Session 3: accuracy 0.70, sensitivity 0.60, specificity 0.80, and balanced accuracy 0.70 (TP=3, TN=4, FP=1, FN=2). It missed two of five occupied batches. This is not sufficient for reliable occupancy detection or deployment. The live tool `tools/live_presence_detector.py` remains a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
 
@@ -35,7 +35,7 @@ The isolated Devourer setup downloads build dependencies under `vendor/.local-de
 - [Live acquisition qualification](docs/LIVE_ACQUISITION_QUALIFICATION_20261122.md).
 - [CSI drift investigation](docs/CSI_DRIFT_INVESTIGATION_20261122.md).
 
-Anonymized feature datasets for Sessions 1, 2, 3 and 4 are published under `data/public_dataset/`. Original labelled JSONL and raw IQ archives remain local-only and need a private encrypted off-device backup. Never publish them.
+Anonymized feature datasets for Sessions 1, 2, 3, 4 and 5 are published under `data/public_dataset/`. Original labelled JSONL and raw IQ archives remain local-only and need a private encrypted off-device backup. Never publish them.
 
 ## Hardware and acquisition
 
@@ -48,25 +48,18 @@ Anonymized feature datasets for Sessions 1, 2, 3 and 4 are published under `data
 
 Strict CSI gates: exactly 52 finite active tones; repeated L-LTF correlation >= 0.85; STF16 correlation <= 0.50; L-LTF symbol relative error <= 0.25; target-source audit match; RX-idle barrier. Do not lower them. Insufficient CSI is never ABSENT.
 
-## Remaining physical data collection
+## Development data collected
 
-Collect one additional independent development session (Session 5), preferably in a separate day/time block from Session 4, using the same frozen physical setup:
+Session 5 is now collected and anonymized. It contains 500 attempts, 498 strict structural CSI profiles, 492 target-attributed strict CSI profiles retained (246 ABSENT and 246 PRESENT), 500/500 RX-idle checks, and 10/10 batches passing both acquisition gates. Its aggregate descriptive median-profile distance is 0.2137 dB RMS. See `docs/SESSION5_ACQUISITION_ANALYSIS_20261122.md`. This distance is not a detector-accuracy metric.
 
-```bash
-cd ~/projects/iot-project
-sudo vendor/.venv/bin/python tools/collect_presence_interleaved.py
-```
-
-Each run performs five paired rounds (10 batches, 500 attempts), alternating ABSENT/PRESENT order, with 30-second settling per batch. Keep the laptop, AP, room layout, hotspot settings, and person position/orientation fixed. Preserve the labelled JSONL and matching raw archive.
-
-After Session 5, analyze Sessions 1, 2, 4 and 5 only:
+The next offline analysis should use Sessions 1, 2, 4 and 5 only:
 
 ```bash
 vendor/.venv/bin/python tools/analyze_presence_development.py \
   --session data/presence_dataset/interleaved_20261122_180724.jsonl \
   --session data/presence_dataset/interleaved_20261122_183204.jsonl \
   --session data/presence_dataset/interleaved_20261122_200618.jsonl \
-  --session data/presence_dataset/interleaved_SESSION5.jsonl
+  --session data/presence_dataset/interleaved_20261122_202430.jsonl
 ```
 
 The development analysis tool rejects Session 3 by its SHA-256 even if the file is renamed. Session 3 has already been used for the single frozen-model evaluation and must never be used for further tuning. Any revised model requires new development sessions and a new untouched held-out session.

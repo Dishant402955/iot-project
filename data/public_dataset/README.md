@@ -81,3 +81,25 @@ Two ABSENT batches (rounds 1 and 5) yielded 49/50 strict CSI profiles each; both
 The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives and original labelled JSONL are not included.
 
 Session 4 joins Sessions 1 and 2 as development data. Session 3 remains reserved as the already-consumed one-time held-out evaluation and must not be used for feature selection, threshold tuning, model selection, or other development decisions. Session 4's descriptive ABSENT/PRESENT profile distance is not a detector-accuracy measurement and must not be treated as one.
+
+
+## Session 5: anonymized interleaved development capture
+
+`interleaved_session_5_anonymized.jsonl` contains a fifth completed five-round interleaved physical capture session. It is development data, not held-out evaluation.
+
+- 5 paired rounds, 10 batches total
+- 5 ABSENT batches and 5 PRESENT batches, alternating order by round
+- 500 capture attempts
+- 498/500 strict structural CSI profiles (99.6%)
+- 492/500 target-attributed strict CSI profiles retained (98.4%): 246 ABSENT and 246 PRESENT
+- 494/500 post-arm target-source matches (98.8%)
+- RX-idle barrier: 500/500 (100%)
+- All 10 batches passed both configured acquisition gates
+- 52 active subcarriers per retained strict CSI profile
+- Wi-Fi channel 149, 20 MHz
+
+Six attempts had strict structural CSI but did not meet the target-attribution requirement for inclusion as labelled feature profiles. The shortfalls in retained profiles occurred in PRESENT rounds 1, 4 and 5 and ABSENT rounds 2 and 3. All batches still passed the configured acquisition gates. These measured shortfalls are retained; no profiles were fabricated or imputed.
+
+The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives and original labelled JSONL are not included.
+
+Session 5 joins Sessions 1, 2 and 4 as development data. Session 3 remains reserved as the already-consumed one-time held-out evaluation and must not be used for feature selection, threshold tuning, model selection, or other development decisions. Session 5's descriptive ABSENT/PRESENT profile distance is not a detector-accuracy measurement and must not be treated as one.

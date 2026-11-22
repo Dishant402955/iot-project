@@ -59,7 +59,7 @@ Each condition is one batch of 50 capture attempts with 30 seconds settling. Tot
 
 Follow each prompt exactly. At completion, save the printed JSONL path and terminal summary. Raw IQ, RX logs, CSI series, audits, manifests, and diagnostics are archived under the matching `data/presence_dataset_raw/interleaved_.../` directory. Do not delete, rename, or overwrite the original or raw archive.
 
-Sessions 1 and 2 are the current development data. Session 3 (source JSONL SHA-256 `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`) was evaluated exactly once after the benchmark model was frozen. It must not be used for any further feature selection or tuning. Collect two more independent development sessions, Sessions 4 and 5, ideally on separate days/time blocks. Analyze Sessions 1, 2, 4 and 5 only. The development-analysis tool rejects Session 3 by content hash even if renamed.
+Sessions 1, 2, 4 and 5 are development data. Sessions 4 and 5 have both been collected. Session 3 (source JSONL SHA-256 `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`) was evaluated exactly once after the benchmark model was frozen. It must not be used for any further feature selection or tuning. Analyze Sessions 1, 2, 4 and 5 only. The development-analysis tool rejects Session 3 by content hash even if renamed.
 
 ## Offline analysis
 

@@ -64,13 +64,19 @@ Each session used five rounds, ten batches, and 50 attempts per batch (500 attem
 
 Sessions 1 and 2 are the only data used by development analysis/model selection. Session 3 was evaluated exactly once after the benchmark was frozen; it was not used for training, feature selection, or threshold tuning. Its source SHA-256 is `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`.
 
-Anonymized feature copies of Sessions 1-3 are published under `data/public_dataset/`; the Session 4 anonymized feature copy is prepared for publication. A dataset README documents the public schema and privacy treatment. They omit BSSID, exact wall-clock timestamps, and local filesystem paths. Raw IQ and original labelled JSONL are excluded from the public repository and still require private encrypted off-device backup.
+Anonymized feature copies of Sessions 1-5 are published under `data/public_dataset/`. A dataset README documents the public schema and privacy treatment. They omit BSSID, exact wall-clock timestamps, and local filesystem paths. Raw IQ and original labelled JSONL are excluded from the public repository and still require private encrypted off-device backup.
 
 ## 5.1 Additional development acquisition: Session 4
 
 Session 4 was collected after the Session 3 held-out evaluation. It is explicitly development data and does not alter or replace the one-time held-out result. The collector completed 500 attempts across ten batches; all ten batches passed both configured acquisition gates and RX-idle was 500/500. There were 498 valid strict CSI profiles: 248 ABSENT and 250 PRESENT. The two shortfalls were one profile each in ABSENT rounds 1 and 5; neither batch failed its configured acquisition gates.
 
 The aggregate ABSENT/PRESENT median feature-profile distance was 0.1707 dB RMS, with per-round distances from 0.0938 to 0.4479 dB RMS. This is a descriptive within-session comparison only, not classification accuracy or evidence of cross-session separability. Session 4 must be included with Sessions 1, 2 and 5 in grouped development analysis, while Session 3 remains excluded from further development. Full acquisition details: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`.
+
+## 5.2 Additional development acquisition: Session 5
+
+Session 5 completed 500 attempts across ten batches. All ten batches passed both acquisition gates and RX-idle was 500/500. There were 498 strict structural CSI profiles; 492 target-attributed strict CSI profiles were retained in the feature dataset (246 ABSENT and 246 PRESENT). Post-arm target-source matches were 494/500. Six attempts had strict structural CSI but did not satisfy the target-attribution requirement for inclusion. All affected batches still passed the configured gates; no feature profiles were fabricated or imputed. The adapter was restored to the `rtw_8821ce` driver after every batch and the saved baseline was not modified.
+
+The aggregate ABSENT/PRESENT median feature-profile distance was 0.2137 dB RMS. Per-round distances ranged from 0.2118 to 0.2981 dB RMS. This is descriptive within-session analysis only, not classifier accuracy or evidence of cross-session separability. Session 5 joins Sessions 1, 2 and 4 as development data. Session 3 remains excluded from all further development. Full details: `docs/SESSION5_ACQUISITION_ANALYSIS_20261122.md`.
 
 ## 6. Development analysis
 

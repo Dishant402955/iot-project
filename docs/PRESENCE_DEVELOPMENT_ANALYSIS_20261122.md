@@ -38,14 +38,14 @@ The live tool has consequently been made diagnostic-only: it reports channel ano
 
 ## Future development sessions and held-out protection
 
-The analysis script defaults to Sessions 1 and 2. Once Sessions 4 and 5 are collected, supply all four development JSONL files explicitly:
+The analysis script defaults to Sessions 1 and 2. Sessions 4 and 5 are now collected. The next grouped analysis should supply all four development JSONL files explicitly:
 
 ```bash
 vendor/.venv/bin/python tools/analyze_presence_development.py \
   --session data/presence_dataset/interleaved_20261122_180724.jsonl \
   --session data/presence_dataset/interleaved_20261122_183204.jsonl \
-  --session data/presence_dataset/interleaved_SESSION4.jsonl \
-  --session data/presence_dataset/interleaved_SESSION5.jsonl
+  --session data/presence_dataset/interleaved_20261122_200618.jsonl \
+  --session data/presence_dataset/interleaved_20261122_202430.jsonl
 ```
 
 The tool rejects the reserved Session 3 source by SHA-256 `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`, even if renamed, and also rejects paths containing its known session identifier. It requires at least two session files inside the repository. Session 3 must not be used for feature/threshold/model selection.

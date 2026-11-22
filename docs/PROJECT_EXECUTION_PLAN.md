@@ -16,6 +16,7 @@ Build and evaluate an academic stationary-room occupancy prototype using RTL8821
 | Interleaved Sessions 1 and 2 | Development data audited | 1,000 attempts, 999 valid strict CSI profiles, all 20 batches pass acquisition gates |
 | Interleaved Session 3 | Reserved held-out data | 500 attempts, 497 valid strict CSI profiles; evaluated once after benchmark freeze; no further tuning |
 | Interleaved Session 4 | Development data collected | 500 attempts, 498 valid strict CSI profiles; 10/10 batches pass both acquisition gates; RX-idle 500/500 |
+| Interleaved Session 5 | Development data collected | 500 attempts, 498 strict structural CSI; 492 target-attributed profiles retained; 10/10 batches pass both gates; RX-idle 500/500 |
 | Occupancy separability | Not established | Development grouped batch evaluation has 0.80 balanced accuracy but 0.60 sensitivity; cross-session transfer has 0.50 balanced accuracy and 0 sensitivity |
 | Final occupancy detector | Not available | Existing live script is a baseline-relative anomaly indicator, not a validated occupancy classifier |
 | Private original-data backup | Not verified | Public anonymized feature datasets are on GitHub; labelled originals/raw IQ need private off-device backup |
@@ -29,7 +30,7 @@ Build and evaluate an academic stationary-room occupancy prototype using RTL8821
 - Corrected repeated-L-LTF pair alignment by evaluating candidate starts at peak offsets -64, 0, +64. Regression test covers stronger second-symbol peak.
 - RX-idle barrier and post-arm AP-source audit heuristic.
 - Five-round interleaved collector, raw archive preservation, offline reprocessor, round-level analysis, and drift diagnostics.
-- Four physical interleaved sessions collected; anonymized public copies for Sessions 1-3 are published and Session 4 public copy is prepared with a passing privacy scan.
+- Five physical interleaved sessions collected; anonymized public feature copies for Sessions 1-5 are published and privacy-scanned.
 - Development-only grouped analysis implemented in tools/analyze_presence_development.py; it defaults to Sessions 1 and 2, accepts Sessions 4 and 5 via repeated --session flags, and rejects Session 3 by source SHA-256.
 
 ## Development analysis result
@@ -52,7 +53,7 @@ The anonymized public feature datasets are committed to GitHub. Original labelle
 
 ### 2. Obtain more development evidence
 
-Session 4 is now collected: 500 attempts, 498 strict CSI profiles, 10/10 batches passed both acquisition gates, and RX-idle was 500/500. Its descriptive analysis is in `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`. Collect one additional independent interleaved session (Session 5), preferably on a separate day/time block, using the same qualified physical setup and protocol. Sessions 4 and 5 join Sessions 1 and 2 as development data. Session 3 has already been evaluated once with the frozen benchmark and cannot be reused for tuning.
+Sessions 4 and 5 are now collected as development data. Session 4: 500 attempts, 498 retained profiles, all 10 batches passed both acquisition gates, RX-idle 500/500. Session 5: 500 attempts, 498 strict structural CSI profiles, 492 target-attributed profiles retained, all 10 batches passed both acquisition gates, RX-idle 500/500. Descriptive reports: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md` and `docs/SESSION5_ACQUISITION_ANALYSIS_20261122.md`. Sessions 4 and 5 join Sessions 1 and 2 as development data. Session 3 has already been evaluated once with the frozen benchmark and cannot be reused for tuning.
 
 Physical capture must run from the laptop's physical console only:
 
@@ -65,7 +66,7 @@ Do not run capture, VFIO binding, or driver reload through SSH or the remote cod
 
 ### 3. Reassess separability on development sessions only
 
-After Session 5, extend the development analysis to Sessions 1, 2, 4 and 5. Compare within-condition variability, between-condition effect sizes, per-tone shape, common gain, spectral slope, tone spread, temporal features, and round/session consistency. Keep batch/session grouping intact. Do not select a model using random packet-level splits. If the added sessions still fail cross-session validation, conclude that this hardware/setup has not demonstrated a usable stationary-presence signal.
+Now extend the development analysis to Sessions 1, 2, 4 and 5. Compare within-condition variability, between-condition effect sizes, per-tone shape, common gain, spectral slope, tone spread, temporal features, and round/session consistency. Keep batch/session grouping intact. Do not select a model using random packet-level splits. If the added sessions still fail cross-session validation, conclude that this hardware/setup has not demonstrated a usable stationary-presence signal.
 
 ### 4. Implement and freeze a detector only if justified
 
