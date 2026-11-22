@@ -1,0 +1,61 @@
+{
+  "model_id": "temporal_extra_trees_all_development_sessions_v1",
+  "model_type": "experimental_demo_classifier",
+  "training_sessions": [
+    {
+      "session": 1,
+      "path": "data/presence_dataset/interleaved_20261122_180724.jsonl",
+      "sha256": "c18489c749c1b7e55effbe2c42a3a4c9a88cd39110419264d1c6f43b93c70836"
+    },
+    {
+      "session": 2,
+      "path": "data/presence_dataset/interleaved_20261122_183204.jsonl",
+      "sha256": "4faca4b438b6bba0bfb2572fa5c4f4cf59558c780d815762f78fb18f51e5f553"
+    },
+    {
+      "session": 4,
+      "path": "data/presence_dataset/interleaved_20261122_200618.jsonl",
+      "sha256": "15fb6d54295d945ab7e64cb5dd64009d33be9afac74f701e8e70713f76d44eca"
+    },
+    {
+      "session": 5,
+      "path": "data/presence_dataset/interleaved_20261122_202430.jsonl",
+      "sha256": "43dce1a015e5291de578d1c9128f51bf130a74ef9c0c9fbba81fa3419e5156db"
+    }
+  ],
+  "training_examples": 40,
+  "class_counts": {
+    "ABSENT": 20,
+    "PRESENT": 20
+  },
+  "feature_definition": "104 features: per-tone median absolute deviation (52) followed by per-tone standard deviation (52), calculated across accepted individually median-centered CSI profiles in each 50-attempt batch",
+  "configuration": {
+    "n_estimators": 250,
+    "max_depth": 2,
+    "min_samples_leaf": 2,
+    "max_features": "sqrt",
+    "class_weight": "balanced",
+    "random_state": 42,
+    "n_jobs": 1
+  },
+  "training_scope": "Sessions 1, 2, 4 and 5 only; held-out Session 3 was not accessed.",
+  "cross_validation_reference": {
+    "grouped_leave_one_session_round_out": {
+      "balanced_accuracy": 0.875,
+      "sensitivity": 0.75,
+      "specificity": 1.0,
+      "false_positives": 0,
+      "false_negatives": 5
+    },
+    "leave_one_development_session_out": {
+      "balanced_accuracy": 0.875,
+      "sensitivity": 0.75,
+      "specificity": 1.0,
+      "false_positives": 0,
+      "false_negatives": 5
+    }
+  },
+  "deployment_status": "EXPERIMENTAL_NOT_VALIDATED_FOR_OCCUPANCY_DECISIONS",
+  "note": "Selected as a research demo candidate because temporal-only features performed better in development grouped and leave-one-session-out comparisons than median-profile-only features. Small sample; model selection used development data; metrics are not independent validation. Session 3 was not accessed or reused.",
+  "artifact_sha256": "ca09ee5d22f70ea64da8c72c727c17f3d5075b0e8fef75a2ac098857614867b6"
+}
