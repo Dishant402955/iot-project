@@ -4,86 +4,95 @@
 
 ## Objective and scope
 
-Build and evaluate an academic binary stationary-room occupancy prototype using RTL8821CE CSI. Output must distinguish `PRESENT` / `ABSENT` only when evidence is sufficient; otherwise report `UNKNOWN` / `INSUFFICIENT_CSI`. This is not a safety/security alarm and is not an exact RF-DS reproduction.
+Build and evaluate an academic stationary-room occupancy prototype using RTL8821CE CSI. The intended outputs are PRESENT and ABSENT only when supported by validated evidence; otherwise the system must return UNKNOWN / INSUFFICIENT_CSI. This is not a safety/security alarm or an exact RF-DS reproduction.
 
 ## Current evidence-based status
 
 | Area | Status | Evidence / interpretation |
 |---|---|---|
-| Raw IQ capture | Qualified in latest physical run | 50/50 structurally valid captures; RX-idle 50/50 |
-| Strict CSI extraction | Qualified in latest run | 50/50 strict CSI; 52 finite active tones |
-| Target AP attribution | Heuristic pass | 50/50 latest run; post-arm RX callback, not hardware BSSID filtering |
-| Interleaved labelled acquisition | Strong acquisition pass | 497/500 strict CSI; 495/500 target-attributed; 10/10 batches pass |
-| Presence separability | Not established | Grouped-by-round classifier unstable; best RBF sensitivity 0.565 |
-| Final detector | Not ready | Needs independent sessions, dev-only tuning, frozen held-out test |
+| RTL8821CE raw-IQ acquisition | Qualified | Dedicated physical qualification; capture/driver restoration completed |
+| Strict CSI extraction | Qualified | 52 finite active tones; repeated-L-LTF alignment fix; strict gates unchanged |
+| Target AP attribution | Heuristic only | Post-arm RX callback and address audit; not hardware source-MAC filtering |
+| Interleaved Sessions 1 and 2 | Development data audited | 1,000 attempts, 999 valid strict CSI profiles, all 20 batches pass acquisition gates |
+| Interleaved Session 3 | Reserved held-out data | 500 attempts, 497 valid strict CSI profiles; must remain untouched until a detector is frozen |
+| Occupancy separability | Not established | Development grouped batch evaluation has 0.80 balanced accuracy but 0.60 sensitivity; cross-session transfer has 0.50 balanced accuracy and 0 sensitivity |
+| Final occupancy detector | Not available | Existing live script is a baseline-relative anomaly indicator, not a validated occupancy classifier |
+| Private original-data backup | Not verified | Public anonymized feature datasets are on GitHub; labelled originals/raw IQ need private off-device backup |
 
-## Completed engineering
+## Completed engineering and data collection
 
 - RTL8821CE PCIe/VFIO LA raw-IQ capture and restoration workflow.
 - Correct Realtek LA selector mapping: CCA=0, CRCOK=1, CRCFAIL=2. CCA is the early-frame trigger.
-- Correct understanding of `t<us>` as the MAC LA trigger-time register, not sample count or IQ-buffer duration.
+- Correct understanding of t<us> as the MAC LA trigger-time register, not sample count or IQ-buffer duration.
 - Strict 52-tone L-LTF extraction and diagnostics.
 - Corrected repeated-L-LTF pair alignment by evaluating candidate starts at peak offsets -64, 0, +64. Regression test covers stronger second-symbol peak.
 - RX-idle barrier and post-arm AP-source audit heuristic.
-- Empty-room baseline-relative live anomaly indicator with separate raw/smoothed states and `INSUFFICIENT_CSI` handling.
-- Five-round interleaved collector, raw archive preservation, offline reprocessor, round-level analysis, drift diagnostics, and classifier-readiness report.
+- Five-round interleaved collector, raw archive preservation, offline reprocessor, round-level analysis, and drift diagnostics.
+- Three physical interleaved sessions collected and anonymized public copies published under data/public_dataset/.
+- Development-only grouped analysis implemented in tools/analyze_presence_development.py; it is pinned to Sessions 1 and 2 and does not open Session 3.
 
-## Existing experimental data
+## Development analysis result
 
-The five-round session from 2026-11-22 is development data, not a final test. Its reprocessed form contains 247 ABSENT and 248 PRESENT profiles from 500 attempts. Acquisition yield is high, but classifier generalization across the five temporal rounds is unstable. The best RBF SVM achieved 0.675 balanced accuracy and 0.565 sensitivity; fold accuracy ranged 0.500-0.939. Do not deploy.
+Sessions 1 and 2 contain 1,000 attempts and 999 valid profiles (500 ABSENT, 499 PRESENT). All 20 batches passed both acquisition gates and RX-idle was 100% in every batch.
 
-The older sequential ABSENT/PRESENT/ABSENT session and RSSI experiments were confounded by drift and remain diagnostic only. See `docs/PRESENCE_SESSION_ANALYSIS.md`, `docs/RSSI_EXPERIMENT_ANALYSIS.md`, and `docs/CSI_DRIFT_INVESTIGATION_20261122.md`.
+A batch-median, nearest-centroid diagnostic with leave-one-session-round-pair-out validation produced 0.80 accuracy / 0.80 balanced accuracy, 0.60 sensitivity and 1.00 specificity (TP=6, TN=10, FP=0, FN=4). However, training on Session 1 and testing Session 2, and vice versa, both produced 0.50 accuracy / balanced accuracy, 0.00 sensitivity and 1.00 specificity. The classifier predicted every held-out batch as ABSENT in both transfer directions. This is not reliable occupancy detection; the within-development score is not sufficient evidence to deploy or freeze a detector.
 
-## Three remaining milestones
+See docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md and its machine-readable JSON result.
 
-### 1. Independent physical sessions
+## Remaining milestones
 
-Collect **three new sessions**, each using the same five-round interleaved collector (10 batches, 500 attempts, 30-second settling per batch). Ideally use separate days/time blocks. Existing 2026-11-22 interleaved data plus new sessions 1 and 2 are development data. New session 3 is reserved as the untouched final test.
+### 1. Secure original data
 
-Before starting, confirm Galaxy M14 battery saver, hotspot power-saving, and hotspot/network settings have not changed since the qualified run. Freeze the current setup. Keep laptop/AP position, channel, room layout, doors/windows, person position, posture, and orientation fixed. Do not introduce traffic or alter capture settings.
+The anonymized public feature datasets are committed to GitHub. Original labelled JSONL files and raw IQ archives remain local-only. Verify raw archive file counts and sizes with sudo, then create and verify an encrypted private/off-device backup. Never upload raw IQ or private labelled source data to the public repository. Do not overwrite the empty-room baseline.
 
-Run each session at the physical laptop console only:
+### 2. Obtain more development evidence
+
+Collect at least two additional independent interleaved sessions (Sessions 4 and 5), preferably on separate days/time blocks, using the same qualified physical setup and protocol. These can join Sessions 1 and 2 as development data. Session 3 remains reserved for the one-time held-out evaluation after the complete detector is frozen.
+
+Physical capture must run from the laptop's physical console only:
 
 ```bash
 cd ~/projects/iot-project
 sudo vendor/.venv/bin/python tools/collect_presence_interleaved.py
 ```
 
-The collector prints a unique output JSONL path and archives the raw IQ/audit/manifest/CSI series. Do not overwrite or delete these. Provide the output path and terminal summary after each run.
+Do not run capture, VFIO binding, or driver reload through SSH or the remote coding agent. Keep the Galaxy M14 AP, channel, bandwidth, laptop/AP positions, room layout, and subject position/orientation fixed. Do not relax strict CSI gates.
 
-### 2. Final detection algorithm
+### 3. Reassess separability on development sessions only
 
-After sessions 1 and 2 are available, perform offline audits and development-only analysis. Compare within-condition variability, between-condition effect sizes, per-tone shape, common gain, spectral slope, tone spread, CFO/RSSI diagnostics, and round/session consistency. Prefer robust, explainable statistics and temporal smoothing over a heavyweight model. Keep strict CSI gates. Add explicit unknown state for insufficient data and link-health anomalies.
+Extend the development analysis to Sessions 1, 2, 4 and 5. Compare within-condition variability, between-condition effect sizes, per-tone shape, common gain, spectral slope, tone spread, temporal features, and round/session consistency. Keep batch/session grouping intact. Do not select a model using random packet-level splits. If the added sessions still fail cross-session validation, conclude that this hardware/setup has not demonstrated a usable stationary-presence signal.
 
-No feature or threshold is final until it is selected using development sessions only. Do not modify the empty-room baseline to make labelled data fit.
+### 4. Implement and freeze a detector only if justified
 
-### 3. Held-out evaluation
+A valid detector needs a reproducible feature pipeline, trained model or statistical rule, confidence/abstention behavior, temporal state logic, and explicit quality/link-health checks. Insufficient CSI must never become ABSENT. Freeze source, preprocessing, features, thresholds, model artifact, and configuration before evaluating Session 3.
 
-Freeze the complete algorithm, thresholds, preprocessing, and smoothing before opening the labels/results for new session 3. Evaluate once on that entire independent session. Do not randomly split adjacent packets or batches across train/test. Report sensitivity, specificity, balanced accuracy, confusion matrix, false alarms/hour, missed detections, valid-CSI availability, unknown rate, and entry/exit latency. Include per-round results and uncertainty.
+The existing tools/live_presence_detector.py remains an experimental baseline-relative channel-anomaly indicator. Its anomaly trigger is not evidence of human presence and it must not be represented as a validated occupancy classifier.
 
-If the held-out result is weak or unstable, the correct conclusion is that this hardware/setup did not demonstrate reliable stationary presence detection. Preserve that result rather than tuning against the test session.
+### 5. One-time held-out evaluation
 
-## Work split
+After freeze, evaluate Session 3 once. Report confusion matrix, sensitivity, specificity, balanced accuracy, precision, valid-CSI availability, UNKNOWN rate, per-round performance, uncertainty, and limitations. If the result is weak, report it without tuning on Session 3. Any subsequent model change requires a new untouched held-out session.
 
-**User must do:** confirm/freeze phone hotspot and power settings; run the three physical capture sessions at the laptop console; keep the room protocol consistent; return each session path and terminal summary. VFIO temporarily detaches the Wi-Fi adapter, so no remote agent should execute these captures.
+### 6. Live hardware integration and final release
 
-**Assistant can do offline:** validate session files and raw archives; inspect diagnostics; implement/refine robust detector and `UNKNOWN` behavior; add tests; tune only on development sessions; freeze the detector; evaluate the untouched held-out session; update reports and handoff.
+Only after offline evidence justifies the detector, integrate it into continuous live capture. Validate empty-to-occupied, stationary occupied, occupied-to-empty, poor-CSI UNKNOWN, and CSI recovery transitions on the physical laptop. Verify graceful Ctrl+C shutdown, driver restoration, no leaked processes/locks, logging, and baseline integrity. Complete final architecture, reproducibility, evaluation, installation, and troubleshooting documentation.
 
 ## Non-negotiable integrity constraints
 
 - Never lower strict CSI gates merely to increase yield.
-- Never interpret insufficient CSI as `ABSENT`.
-- Never overwrite `data/live_presence_baseline.json` without explicit approval.
+- Never interpret insufficient CSI as ABSENT.
+- Never overwrite data/live_presence_baseline.json without explicit approval.
 - Keep room-specific baseline, labelled data, raw IQ, and derived private session files out of GitHub.
-- Never claim accuracy or deployment readiness from the existing single session.
+- Never claim accuracy or deployment readiness from development-only or within-session results.
+- Do not inspect or tune against Session 3 before the detector is frozen.
 - No VFIO binding, driver reload, or physical capture through SSH/remote coding agent.
 - No destructive Git operations or cleanup of user data.
 
-## Current authoritative documents
+## Authoritative documents
 
-- `docs/LIVE_DETECTOR_STATUS.md` — technical verdict and latest evidence.
-- `docs/HANDOFF.md` — cross-chat state and exact next actions.
-- `docs/presence-sensing-runbook.md` — physical capture protocol.
-- `docs/PRESENCE_CLASSIFIER_READINESS_20261122.md` — classifier evaluation.
-- `docs/LTF_ALIGNMENT_RECOVERY_20261122.md` — extraction bug and fix.
-- `docs/LIVE_ACQUISITION_QUALIFICATION_20261122.md` — latest live acquisition metrics.
+- docs/LIVE_DETECTOR_STATUS.md — technical verdict and latest evidence.
+- docs/HANDOFF.md — cross-chat state and exact next actions.
+- docs/presence-sensing-runbook.md — physical capture protocol.
+- docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md — Sessions 1 and 2 analysis.
+- docs/PRESENCE_CLASSIFIER_READINESS_20261122.md — earlier single-session classifier evaluation.
+- docs/LTF_ALIGNMENT_RECOVERY_20261122.md — extraction bug and fix.
+- docs/LIVE_ACQUISITION_QUALIFICATION_20261122.md — live acquisition qualification.

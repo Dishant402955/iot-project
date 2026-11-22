@@ -4,7 +4,9 @@
 
 ## Verdict
 
-The RTL8821CE acquisition and strict CSI extraction path is now qualified on a fresh 50-capture physical run, and the five-round interleaved dataset has been reprocessed successfully after fixing an L-LTF pair-alignment bug. However, the current presence classifier is **not validated**. Grouped-by-round evaluation is unstable and sensitivity is inadequate. The live baseline-relative anomaly detector remains experimental.
+The RTL8821CE acquisition and strict CSI extraction path is qualified for the tested physical setup. Three interleaved sessions have been collected and anonymized public feature copies have been released. However, the available development data does **not** support a reliable stationary-presence classifier. The project does not yet have a validated working occupancy detector.
+
+The existing tools/live_presence_detector.py is a baseline-relative channel-anomaly indicator. Its anomaly/motion triggers can be caused by channel drift and are not validated evidence of human presence. Do not describe its PRESENT / ABSENT output labels as validated occupancy decisions or deploy it as such.
 
 ## Acquisition evidence
 
@@ -16,47 +18,47 @@ The RTL8821CE acquisition and strict CSI extraction path is now qualified on a f
 - Repeat L-LTF correlation: min 0.99589, median 0.99736, max 0.99907.
 - STF16 correlation: min 0.05995, median 0.06428, max 0.07191.
 - L-LTF symbol relative error: min 0.01959, median 0.02322, max 0.03072.
-- Driver restored to `rtw_8821ce`; empty-room baseline SHA-256 unchanged: `2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74`.
+- Driver restored to rtw_8821ce; empty-room baseline SHA-256 unchanged: 2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74.
 
 This is an acquisition-quality pass, not proof of presence detection. AP attribution remains a post-arm callback heuristic because CCA is not source-MAC-filtered.
 
-### Five-round interleaved dataset
+### Three interleaved sessions
 
-Original session: `data/presence_dataset/interleaved_20261122_160950.jsonl`
-Reprocessed session: `data/presence_dataset/interleaved_20261122_160950_reprocessed.jsonl`
-Raw archive: `data/presence_dataset_raw/interleaved_20261122_160950/`
+| Session | Purpose | Attempts | Valid strict CSI | Notes |
+|---|---|---:|---:|---|
+| 1 | Development | 500 | 500 | 10/10 batches pass both acquisition gates |
+| 2 | Development | 500 | 499 | 10/10 batches pass both acquisition gates |
+| 3 | Reserved held-out | 500 | 497 | 10/10 batches pass both acquisition gates; do not inspect before freeze |
 
-- 500 attempts across 10 batches and five paired rounds.
-- 497/500 strict CSI (99.4%).
-- 495/500 target-attributed strict CSI (99.0%).
-- RX-idle 500/500; AP heuristic matches 498/500.
-- All 10 batches passed acquisition gates.
-- ABSENT: 247 profiles; PRESENT: 248 profiles.
+All three sessions have 500 attempts, five paired rounds and ten batches. Every retained profile has 52 active tones. The anonymized public feature datasets and README are in data/public_dataset/ and have been pushed to GitHub. Original labelled JSONL and raw IQ remain local-only.
 
-The reprocessor preserves original labels and raw files, writes a separate output, and refuses to overwrite.
+### Development analysis: Sessions 1 and 2 only
+
+- 1,000 attempts; 999 valid strict CSI profiles (500 ABSENT, 499 PRESENT).
+- 20/20 batches pass both acquisition gates; RX-idle is 100% in every batch.
+- Grouped leave-one-session-round-pair-out batch-median nearest-centroid diagnostic: accuracy 0.80, sensitivity 0.60, specificity 1.00, balanced accuracy 0.80 (TP=6, TN=10, FP=0, FN=4).
+- Train Session 1/test Session 2: accuracy 0.50, sensitivity 0.00, specificity 1.00, balanced accuracy 0.50.
+- Train Session 2/test Session 1: same result. Both transfer tests predicted all batches ABSENT.
+
+The cross-session result fails. The within-development result is based on only ten paired rounds and has poor sensitivity. No model should be frozen or deployed from these data. Full details and reproducible script: docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md, tools/analyze_presence_development.py.
 
 ## L-LTF extraction correction
 
-The matched-filter extractor could select the second of the two repeated 64-sample L-LTF symbols as the pair start, then compare it against SIGNAL. The fix tests candidate pair starts at `peak - 64`, `peak`, and `peak + 64`, including fallback candidates. The strict CSI thresholds were not changed. Regression coverage includes the case where the second-symbol peak is stronger. Synthetic noise/interference tests did not falsely pass. Details: `docs/LTF_ALIGNMENT_RECOVERY_20261122.md`.
-
-## Classifier evaluation
-
-Leave-one-round-out evaluation on the single physical session is unstable. Best RBF SVM: accuracy 0.675, balanced accuracy 0.675, sensitivity 0.565, specificity 0.785, ROC AUC 0.716. Fold accuracy ranged from 0.500 to 0.939. Other models performed worse or showed poor sensitivity. This is insufficient for deployment and is not independent-session validation. Details: `docs/PRESENCE_CLASSIFIER_READINESS_20261122.md`.
+The matched-filter extractor could select the second of the two repeated 64-sample L-LTF symbols as the pair start, then compare it against SIGNAL. The fix tests candidate pair starts at peak - 64, peak, and peak + 64, including fallback candidates. Strict CSI thresholds were not changed. Regression coverage includes the case where the second-symbol peak is stronger. Details: docs/LTF_ALIGNMENT_RECOVERY_20261122.md.
 
 ## Detector semantics and safety
 
-- `PRESENT` / `ABSENT` are experimental states relative to a calibrated empty-room baseline.
-- `PENDING` indicates a raw trigger that has not met temporal smoothing criteria.
-- `INSUFFICIENT_CSI` means the batch lacks enough accepted measurements to score. It must not update the state and must never be mapped to `ABSENT`.
-- Baseline must not be overwritten during labelled data collection or classifier evaluation.
-- Drift indicators (common gain, spectral slope, tone spread, RSSI, CFO) are diagnostics/nuisance variables until validated as features.
+- Intended final outputs: PRESENT, ABSENT, UNKNOWN / INSUFFICIENT_CSI.
+- INSUFFICIENT_CSI means the batch lacks enough accepted measurements to score. It must not update occupancy state and must never be mapped to ABSENT.
+- Drift indicators (common gain, spectral slope, tone spread, RSSI, CFO) remain diagnostics/nuisance variables until validated as features.
+- The empty-room baseline is unchanged and must not be overwritten without explicit approval.
 
 ## Remaining work
 
-1. Collect three additional independent five-round interleaved sessions. Keep configuration and environment fixed; ideally collect on separate days/time blocks.
-2. Use the existing 2026-11-22 session and the first two new sessions for development only. Reserve the third new session untouched as the final held-out test.
-3. Audit labels, capture provenance, acquisition gates, drift, and session-level separation.
-4. Tune a simple robust detector on development sessions only, retaining strict CSI gates and explicit unknown handling. Freeze features, thresholds, and smoothing before evaluating the held-out session.
-5. Report sensitivity, specificity, balanced accuracy, false alarms/hour, missed detections, CSI availability, unknown rate, and entry/exit latency with session-level uncertainty.
+1. Verify and privately back up original labelled JSONL and raw IQ archives; the raw archive contents have not been fully verified or backed up off-device.
+2. Collect at least two more independent development sessions (Sessions 4 and 5), preferably on separate days/time blocks, with the same qualified physical setup.
+3. Extend grouped/session-transfer analysis to Sessions 1, 2, 4 and 5 only. Do not use Session 3 for feature or threshold selection.
+4. If development evidence supports a stable model, implement explicit confidence/abstention and quality handling, freeze the complete detector, and evaluate Session 3 once.
+5. Integrate live inference and validate physical occupancy transitions only if offline held-out performance supports it.
 
-Do not claim success unless independent held-out performance supports it. If it does not, report the hardware/configuration limitation honestly.
+If additional development data still fails cross-session validation, report that this hardware/setup did not demonstrate reliable stationary-presence detection. Do not tune against the held-out session.

@@ -1,91 +1,121 @@
 # Project handoff: Wi-Fi stationary human-presence sensing
 
 **Updated:** 2026-11-22
-**Repository:** `/home/user/projects/iot-project`
-**Branch:** `main`
-**Goal:** evaluate a binary `PRESENT` / `ABSENT` stationary-room detector using RTL8821CE CSI. Use `UNKNOWN` / `INSUFFICIENT_CSI` whenever acquisition or evidence is inadequate.
+**Repository:** /home/user/projects/iot-project
+**Branch:** main
+**Goal:** research an experimental stationary-room occupancy detector using RTL8821CE CSI. Intended states are PRESENT, ABSENT, and UNKNOWN / INSUFFICIENT_CSI when evidence or capture quality is inadequate.
 
 ## Current verdict
 
-The acquisition pipeline is in substantially better shape than the classifier. A fresh physical 50-capture qualification run produced 50/50 strict CSI profiles. The five-round interleaved labelled dataset produced 497/500 strict CSI profiles after reprocessing with the corrected L-LTF alignment. However, leave-one-round-out classification is unstable: the best RBF SVM had 0.675 balanced accuracy and 0.565 sensitivity, with fold accuracy ranging from 0.500 to 0.939. **There is no validated stationary-presence detector yet. Do not deploy or claim accuracy.**
+**CSI acquisition works for the tested configuration; a reliable occupancy detector has not been demonstrated.** Do not deploy or claim presence-detection accuracy yet.
 
-## Latest data and reports
+Three five-round interleaved physical sessions were collected. Sessions 1 and 2 are development data. Session 3 is reserved as held-out and has not been used in the latest development analysis. Anonymized public feature copies of all three sessions and their README are published on GitHub. Original labelled JSONL and raw IQ are local-only.
 
-- Development session: `data/presence_dataset/interleaved_20261122_160950.jsonl`.
-- Corrected reprocessed output: `data/presence_dataset/interleaved_20261122_160950_reprocessed.jsonl`.
-- Raw archive: `data/presence_dataset_raw/interleaved_20261122_160950/`.
-- Strict CSI: 497/500 (99.4%); target-attributed strict CSI: 495/500 (99.0%); RX-idle: 500/500; AP heuristic matches: 498/500; 10/10 batches passed acquisition gates.
-- Labels: 247 ABSENT and 248 PRESENT profiles.
-- Fresh live qualification: 50/50 strict CSI, 50/50 RX-idle, 50/50 target-source heuristic; baseline SHA-256 unchanged: `2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74`.
-- Key reports: `docs/LIVE_ACQUISITION_QUALIFICATION_20261122.md`, `docs/LTF_ALIGNMENT_RECOVERY_20261122.md`, `docs/PRESENCE_CLASSIFIER_READINESS_20261122.md`, `docs/CSI_DRIFT_INVESTIGATION_20261122.md`.
+The development analysis found 999 valid strict CSI profiles from 1,000 attempts across Sessions 1 and 2. All 20 batches passed both acquisition gates. A batch-median nearest-centroid grouped evaluation produced 0.80 balanced accuracy but only 0.60 sensitivity. More importantly, cross-session transfer in both directions produced 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is a failure to establish robust session-independent occupancy information, not a usable detector.
 
-## Important extraction fix
+## Latest completed work
 
-`vendor/devourer/tools/la_csi.py` previously selected one matched-filter peak and could choose the second of the two repeated 64-sample L-LTF symbols, then compare it with SIGNAL. It now evaluates candidate pair starts at `peak - 64`, `peak`, and `peak + 64`, including fallback candidates. Strict gates are unchanged. Regression coverage includes the stronger-second-symbol case. Reprocessing improved the five-round session to 497/500 strict CSI. The reprocessor writes a separate `_reprocessed.jsonl`, preserves labels, and refuses overwrite.
+- Fixed repeated-L-LTF pair alignment in vendor/devourer/tools/la_csi.py by testing candidate pair starts at matched-filter peak offsets -64, 0, +64. Strict quality gates were unchanged.
+- Qualified live acquisition: 50/50 strict CSI, 50/50 RX-idle, 50/50 target-source heuristic; driver restored and baseline hash unchanged.
+- Collected three five-round interleaved sessions (500 attempts each):
+  - Session 1: 500/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_180724.jsonl.
+  - Session 2: 499/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_183204.jsonl.
+  - Session 3: 497/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_185040.jsonl; reserved held-out.
+- Published anonymized feature copies:
+  - data/public_dataset/interleaved_session_1_anonymized.jsonl
+  - data/public_dataset/interleaved_session_2_anonymized.jsonl
+  - data/public_dataset/interleaved_session_3_anonymized.jsonl
+  - data/public_dataset/README.md
+- Added tools/analyze_presence_development.py, pinned to Sessions 1 and 2, plus unit tests and development analysis report. It deliberately refuses alternate input paths to protect Session 3.
 
-## Hardware / physical-capture constraints
+## Latest development analysis
 
-- Ubuntu 22.04.5, RTL8821CE PCI `10ec:c821`, BDF `0000:01:00.0`, driver `rtw_8821ce`, interface `wlp1s0`.
+Report: docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md
+Machine-readable output: docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.json
+
+| Evaluation | Accuracy | Sensitivity | Specificity | Balanced accuracy |
+|---|---:|---:|---:|---:|
+| Leave one session-round pair out | 0.80 | 0.60 | 1.00 | 0.80 |
+| Train S1 / test S2 | 0.50 | 0.00 | 1.00 | 0.50 |
+| Train S2 / test S1 | 0.50 | 0.00 | 1.00 | 0.50 |
+
+Do not freeze a classifier from this result. The cross-session test is the key failure. Session 3 remains untouched.
+
+## Hardware and capture constraints
+
+- Ubuntu 22.04.5, RTL8821CE PCI 10ec:c821, BDF 0000:01:00.0, driver rtw_8821ce, interface wlp1s0.
 - 1T1R, 20 MHz, 20 Msps, 8192 complex samples, 52 active tones.
-- Dedicated Galaxy M14 hotspot used in recent runs: 5 GHz channel 149.
-- CCA is the early-frame trigger. `t<us>` sets Realtek's MAC LA trigger-time register, not sample count or IQ-buffer duration.
+- Qualified AP: Galaxy M14 hotspot, 5 GHz channel 149. Keep this exact setup for future physical sessions; another Wi-Fi connection is fine for offline software work only.
+- CCA is the early-frame trigger. t<us> sets Realtek's MAC LA trigger-time register, not sample count or IQ-buffer duration.
 - Capture temporarily detaches the Wi-Fi adapter using VFIO and interrupts connectivity. **Only the user may run physical capture from the laptop console. Never run capture remotely or over SSH.**
-- AP attribution is heuristic: first good post-arm RX callback plus address checks and RX-idle barrier. It is not hardware source-MAC filtering or proof that the exact callback frame caused the IQ trigger.
+- AP attribution is heuristic, not hardware source-MAC filtering.
 
-Strict CSI gates: exactly 52 finite tones; repeated L-LTF correlation >=0.85; STF16 correlation <=0.50; L-LTF symbol relative error <=0.25; target-source audit match; RX-idle barrier. Do not relax.
+Strict CSI gates remain: exactly 52 finite tones; repeated L-LTF correlation >=0.85; STF16 correlation <=0.50; L-LTF symbol relative error <=0.25; target-source audit match; RX-idle barrier. Do not relax.
 
-## Three remaining milestones and exact user actions
+## What remains and who does it
 
-### First: freeze hotspot configuration
+### User actions
 
-Before another capture, confirm that Galaxy M14 battery saver, hotspot power-saving, and hotspot/network settings have not changed during the experiments. Keep the current known-good configuration fixed. Also keep laptop/AP placement, channel, room layout, doors/windows, and person position/orientation fixed. Do not change trigger timing or thresholds.
+1. Verify raw IQ archive contents and create an encrypted private/off-device backup of the original labelled JSONL and raw IQ. Public GitHub contains only anonymized feature datasets; do not publish raw IQ or private labelled sources.
+2. Collect at least two more independent development sessions (Sessions 4 and 5), ideally on separate days/time blocks, using the same physical setup and collector. Run only at the laptop console:
 
-### Second: collect three independent physical sessions
+   ```bash
+   cd ~/projects/iot-project
+   sudo vendor/.venv/bin/python tools/collect_presence_interleaved.py
+   ```
 
-Use the same command for each session, ideally on separate days/time blocks. Each run performs five paired rounds (10 batches, 500 attempts), alternating ABSENT/PRESENT order, with 30-second settling per batch.
+3. After a detector is justified, perform live physical entry/exit/empty/occupied/poor-CSI tests at the laptop console.
 
-```bash
-cd ~/projects/iot-project
-sudo vendor/.venv/bin/python tools/collect_presence_interleaved.py
-```
+### Assistant/offline work
 
-Follow every on-screen prompt. For ABSENT, leave the monitored room and stay at least 5 m from both laptop and AP, preferably behind a closed door; keep other people out. For PRESENT, occupy the same marked position, posture, and orientation for every round and remain still. Keep doors/windows/furniture and phone/laptop positions unchanged. No streaming/downloads or deliberate traffic.
+- Extend development analysis to Sessions 1, 2, 4 and 5 only.
+- Select features/model only if cross-session validation supports it.
+- Implement confidence, abstention, temporal logic and strict quality handling.
+- Freeze source, features, preprocessing, model and thresholds before evaluating Session 3 once.
+- Produce held-out report, live integration, tests and final documentation if the evidence supports proceeding.
 
-At the end, copy the printed JSONL path and summary. The matching raw capture archive is created under `data/presence_dataset_raw/`. Do not rename, delete, or overwrite either. Repeat for sessions 2 and 3.
+## Data integrity and backup caveat
 
-Dataset split: existing 2026-11-22 interleaved session + new sessions 1 and 2 are development data. New session 3 is the untouched final held-out test. Do not inspect/tune against session 3 before the detector is frozen.
-
-### Third: assistant completes offline work
-
-After each capture is returned, inspect the exact JSONL and corresponding raw archive. Validate labels, round order, capture counts, BSSID/channel, dimensions, finite values, source audit, RX-idle, CSI yield, and drift. Then use development sessions only to select robust features and thresholds, implement explicit unknown/link-health handling, add tests, and freeze the complete detector. Evaluate once on the untouched third session and report sensitivity, specificity, balanced accuracy, false alarms/hour, missed detections, availability, unknown rate, and entry/exit latency.
-
-No honest held-out evaluation can be completed before the physical sessions exist. Coding, tests, and offline analysis can be completed in a consolidated pass after the data is available.
+- Empty-room baseline: data/live_presence_baseline.json; SHA-256 2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74. Never overwrite without explicit approval.
+- Original labelled session JSONL and raw IQ archives are ignored by Git and remain local-only.
+- Public anonymized datasets are backed up on GitHub. Raw IQ archive directory existence was previously confirmed, but contents and off-device backup have not been fully verified because root-owned directories were inaccessible to the unprivileged remote agent.
+- .gitignore protects /data/presence_dataset/ and /data/presence_dataset_raw/.
+- No destructive Git operations, cleanup, reset, or force-push.
 
 ## Key files
 
-- `tools/collect_presence_interleaved.py` — physical five-round collector.
-- `tools/reprocess_presence_archives.py` — offline corrected CSI extraction/reprocessing.
-- `tools/analyze_interleaved_presence.py` — round-level analysis.
-- `tools/live_presence_detector.py` — experimental baseline-relative live indicator, not validated classifier.
-- `tools/analyze_presence_run.py` — strict capture/source audit.
-- `vendor/devourer/tools/la_csi.py` — strict L-LTF CSI extraction.
-- `data/live_presence_baseline.json` — local empty-room baseline; never overwrite.
-- `docs/PROJECT_EXECUTION_PLAN.md` — authoritative remaining milestones.
-- `docs/presence-sensing-runbook.md` — physical operator protocol.
+- tools/collect_presence_interleaved.py — physical five-round collector.
+- tools/reprocess_presence_archives.py — offline corrected CSI extraction/reprocessing.
+- tools/analyze_presence_development.py — development-only grouped analysis pinned to Sessions 1 and 2.
+- tools/live_presence_detector.py — experimental baseline-relative channel-anomaly indicator, not a validated occupancy classifier.
+- tools/analyze_presence_run.py — strict capture/source audit.
+- vendor/devourer/tools/la_csi.py — strict L-LTF CSI extraction.
+- data/live_presence_baseline.json — local empty-room baseline; do not overwrite.
+- docs/PROJECT_EXECUTION_PLAN.md — authoritative remaining milestones.
+- docs/presence-sensing-runbook.md — physical capture protocol.
 
-## Tests / checks
-
-Run offline from repository root:
+## Reproducibility checks
 
 ```bash
+vendor/.venv/bin/python tools/analyze_presence_development.py
+vendor/.venv/bin/python -m unittest tests.test_presence_development_analysis -v
 vendor/.venv/bin/python -m unittest discover -s tests -v
 vendor/.venv/bin/python vendor/devourer/tools/la_csi.py --selftest
 vendor/.venv/bin/python vendor/devourer/tests/la_csi_series_selftest.py
 python3 -m compileall -q tools vendor/devourer/tools tests
+cmake --build build -j2
+ctest --test-dir build --output-on-failure
 bash -n tools/rtl8821ce_pcie_la_capture.sh
-git diff --check
 ```
 
-## Data and Git integrity
+## Latest software validation (2026-11-22)
 
-Room-specific baseline, labelled JSONL, raw IQ archives, RSSI CSVs, and derived private analyses are local-only and ignored by Git. Commit source, tests, research notes, and documentation only. Never reset, clean, force-push, or overwrite baseline/data.
+- Python unit suite: 31 tests passed.
+- L-LTF extractor self-test: passed, including noise rejection and repeated-symbol alignment regression.
+- CSI-series self-test: passed.
+- Python compileall: passed.
+- Capture shell syntax check: passed.
+- Existing C++ test executable `build/wifi_tests`: passed.
+- A fresh CMake rebuild/CTest invocation could not run in the remote workspace: the `cmake` command is absent from PATH, and the repository-bundled CMake binary cannot load `libjsoncpp.so.25`. The existing C++ test binary was run separately and passed; this is not a fresh build verification.
+- `git diff --check`: passed.
+- Privacy scan of the new analysis report: passed (no BSSID, `/home/user/`, raw capture paths, or UTC timestamp fields).

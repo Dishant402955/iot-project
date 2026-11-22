@@ -1,0 +1,136 @@
+{
+  "analysis_scope": "development sessions 1 and 2 only; held-out session 3 not opened or analyzed",
+  "sessions": [
+    "data/presence_dataset/interleaved_20261122_180724.jsonl",
+    "data/presence_dataset/interleaved_20261122_183204.jsonl"
+  ],
+  "counts": {
+    "attempts": 1000,
+    "valid_profiles": 999,
+    "absent_profiles": 500,
+    "present_profiles": 499,
+    "batches": 20,
+    "batches_passing_acquisition_gates": 20
+  },
+  "grouped_leave_one_session_round_out_batch_metrics": {
+    "n_batches": 20,
+    "tp": 6,
+    "tn": 10,
+    "fp": 0,
+    "fn": 4,
+    "accuracy": 0.8,
+    "sensitivity": 0.6,
+    "specificity": 1.0,
+    "balanced_accuracy": 0.8
+  },
+  "session_transfer_metrics": {
+    "train_session_1_test_session_2": {
+      "n_batches": 10,
+      "tp": 0,
+      "tn": 5,
+      "fp": 0,
+      "fn": 5,
+      "accuracy": 0.5,
+      "sensitivity": 0.0,
+      "specificity": 1.0,
+      "balanced_accuracy": 0.5
+    },
+    "train_session_2_test_session_1": {
+      "n_batches": 10,
+      "tp": 0,
+      "tn": 5,
+      "fp": 0,
+      "fn": 5,
+      "accuracy": 0.5,
+      "sensitivity": 0.0,
+      "specificity": 1.0,
+      "balanced_accuracy": 0.5
+    }
+  },
+  "paired_rounds": [
+    {
+      "session": 1,
+      "round": 1,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.15853655424240914,
+      "present_minus_absent_tone_spread_db": 0.09731570597992056
+    },
+    {
+      "session": 1,
+      "round": 2,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.09979730742261674,
+      "present_minus_absent_tone_spread_db": 0.02993840731467179
+    },
+    {
+      "session": 1,
+      "round": 3,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.10766661516279143,
+      "present_minus_absent_tone_spread_db": 0.06893081365669218
+    },
+    {
+      "session": 1,
+      "round": 4,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.03739378890669261,
+      "present_minus_absent_tone_spread_db": 0.026965306180032567
+    },
+    {
+      "session": 1,
+      "round": 5,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.0935854788913773,
+      "present_minus_absent_tone_spread_db": -0.08023213141152818
+    },
+    {
+      "session": 2,
+      "round": 1,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.12276440093480556,
+      "present_minus_absent_tone_spread_db": -0.07901923019156776
+    },
+    {
+      "session": 2,
+      "round": 2,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.11278578711897476,
+      "present_minus_absent_tone_spread_db": -0.0739252697656323
+    },
+    {
+      "session": 2,
+      "round": 3,
+      "absent_profiles": 50,
+      "present_profiles": 49,
+      "median_profile_distance_db_rms": 0.3194486000573961,
+      "present_minus_absent_tone_spread_db": -0.24661887804412985
+    },
+    {
+      "session": 2,
+      "round": 4,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.0739373766637829,
+      "present_minus_absent_tone_spread_db": -0.003415008333002678
+    },
+    {
+      "session": 2,
+      "round": 5,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.0848584300799363,
+      "present_minus_absent_tone_spread_db": -0.01415769792420929
+    }
+  ],
+  "method": "For each batch, take the per-tone median across valid CSI profiles. Standardize using training batches only, fit two class centroids, and classify the held-out paired round by nearest centroid. The two batches in a held-out session-round are kept together.",
+  "interpretation": "Exploratory batch-level diagnostic only. Ten paired rounds are too few for a reliable performance claim. Session-transfer failure and low sensitivity mean no occupancy detector is justified by these development data.",
+  "detector_frozen": false,
+  "held_out_session_3_touched": false
+}
