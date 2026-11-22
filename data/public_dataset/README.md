@@ -22,3 +22,22 @@ The JSONL file contains one `session_metadata` record followed by ten `interleav
 ## Important limitations
 
 This is a single controlled-environment development/validation session, not a held-out evaluation. It must not be interpreted as evidence of generalization across rooms, devices, people, or environments. The detector remains experimental; `UNKNOWN`/insufficient-capture handling and independent held-out evaluation are required before any practical deployment.
+
+## Session 2: anonymized interleaved capture
+
+`interleaved_session_2_anonymized.jsonl` contains a second completed five-round interleaved physical capture session.
+
+- 5 paired rounds, 10 batches total
+- 5 ABSENT batches and 5 PRESENT batches, alternating order by round
+- 500 capture attempts; 499 valid strict CSI profiles (99.8%)
+- 499/500 target-attributed strict CSI profiles (99.8%)
+- RX-idle barrier: 500/500 (100%)
+- All 10 batches passed both acquisition gates
+- 52 active subcarriers per retained strict CSI profile
+- Wi-Fi channel 149, 20 MHz
+
+One PRESENT batch (round 3) yielded 49/50 strict CSI profiles; it still passed the configured batch acquisition gates. The dataset retains this measured shortfall rather than fabricating a 500th valid profile.
+
+The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives are not included.
+
+This remains controlled-environment development/validation data, not held-out evaluation or evidence of generalization across rooms, devices, people, or environments.
