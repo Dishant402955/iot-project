@@ -168,3 +168,13 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 1. Inspect root-owned raw IQ archives and create/verify encrypted off-device backup of private raw data and labelled JSONL. This remote session did not use sudo, read private IQ contents, or claim backup completion.
 2. Run physical-console empty/occupied/entry/exit/poor-CSI and driver-restoration/Ctrl+C checks. No physical capture was performed remotely.
 3. If research continues, collect more independent development data and a new untouched held-out session. The existing Session 3 is permanently consumed.
+
+## GitHub sync checkpoint
+
+- Combined analysis, model-comparison tooling, reports, tests, and documentation were committed and pushed to `main` in commit `7ce21e2c6e4fbfc5eff87a535163e690c4b8a46a` (`Compare grouped CSI presence models`).
+- The remote branch was verified to match `origin/main` after the push. No private labelled JSONL, raw IQ, or baseline/model artifacts were changed.
+- Final software verification: 42/42 Python unit tests; L-LTF self-test; CSI-series self-test; Python compileall; capture-shell syntax; `git diff --check`; existing `build/wifi_tests` all passed.
+- Baseline SHA-256 remains `2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74`; frozen benchmark SHA-256 remains `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`.
+- Fresh CMake rebuild/CTest was not run because the remote workspace's CMake runtime was previously unavailable (`libjsoncpp.so.25` missing); only the existing C++ test executable was run.
+- Raw archive directories for Sessions 1, 2, 4 and 5 are present but root-owned and their round subdirectories return permission denied to the remote user. No raw IQ content was read and no encrypted off-device backup was created.
+- No physical capture or live transition test was run. These remain physical-console tasks.
