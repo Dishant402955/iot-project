@@ -9,7 +9,7 @@
 
 **CSI acquisition works for the tested configuration; a reliable occupancy detector has not been demonstrated.** Do not deploy or claim presence-detection accuracy yet.
 
-Three five-round interleaved physical sessions were collected. Sessions 1 and 2 are development data. Session 3 was reserved as held-out, was excluded from development analysis/model selection, and was evaluated exactly once after freezing the benchmark model. Anonymized public feature copies of all three sessions and their README are published on GitHub. Original labelled JSONL and raw IQ are local-only.
+Four five-round interleaved physical sessions have now been collected. Sessions 1 and 2 are development data. Session 3 was reserved as held-out, was excluded from development analysis/model selection, and was evaluated exactly once after freezing the benchmark model. Anonymized public feature copies of Sessions 1-3 are published on GitHub; Session 4 has been anonymized, privacy-scanned, and prepared for publication. Original labelled JSONL and raw IQ are local-only.
 
 The development analysis found 999 valid strict CSI profiles from 1,000 attempts across Sessions 1 and 2. All 20 batches passed both acquisition gates. A batch-median nearest-centroid grouped evaluation produced 0.80 balanced accuracy but only 0.60 sensitivity. More importantly, cross-session transfer in both directions produced 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is a failure to establish robust session-independent occupancy information, not a usable detector.
 
@@ -17,14 +17,16 @@ The development analysis found 999 valid strict CSI profiles from 1,000 attempts
 
 - Fixed repeated-L-LTF pair alignment in vendor/devourer/tools/la_csi.py by testing candidate pair starts at matched-filter peak offsets -64, 0, +64. Strict quality gates were unchanged.
 - Qualified live acquisition: 50/50 strict CSI, 50/50 RX-idle, 50/50 target-source heuristic; driver restored and baseline hash unchanged.
-- Collected three five-round interleaved sessions (500 attempts each):
+- Collected four five-round interleaved sessions (500 attempts each):
   - Session 1: 500/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_180724.jsonl.
   - Session 2: 499/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_183204.jsonl.
-  - Session 3: 497/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_185040.jsonl; reserved held-out.
+  - Session 3: 497/500 valid strict CSI; source data/presence_dataset/interleaved_20261122_185040.jsonl; reserved held-out and evaluated once.
+  - Session 4: 498/500 valid strict CSI (248 ABSENT, 250 PRESENT); all 10 batches passed both acquisition gates; RX-idle 500/500; source data/presence_dataset/interleaved_20261122_200618.jsonl.
 - Published anonymized feature copies:
   - data/public_dataset/interleaved_session_1_anonymized.jsonl
   - data/public_dataset/interleaved_session_2_anonymized.jsonl
   - data/public_dataset/interleaved_session_3_anonymized.jsonl
+  - data/public_dataset/interleaved_session_4_anonymized.jsonl (prepared; next commit)
   - data/public_dataset/README.md
 - Added tools/analyze_presence_development.py, pinned to Sessions 1 and 2, plus unit tests and development analysis report. It accepts explicit development sessions but rejects Session 3 by SHA-256 to protect it from tuning.
 
@@ -57,7 +59,7 @@ Strict CSI gates remain: exactly 52 finite tones; repeated L-LTF correlation >=0
 ### User actions
 
 1. Verify raw IQ archive contents and create an encrypted private/off-device backup of the original labelled JSONL and raw IQ. Public GitHub contains only anonymized feature datasets; do not publish raw IQ or private labelled sources.
-2. Collect at least two more independent development sessions (Sessions 4 and 5), ideally on separate days/time blocks, using the same physical setup and collector. Run only at the laptop console:
+2. Collect one more independent development session (Session 5), ideally on a separate day/time block from Session 4, using the same physical setup and collector. Run only at the laptop console:
 
    ```bash
    cd ~/projects/iot-project
@@ -68,7 +70,7 @@ Strict CSI gates remain: exactly 52 finite tones; repeated L-LTF correlation >=0
 
 ### Assistant/offline work
 
-- Extend development analysis to Sessions 1, 2, 4 and 5 only.
+- Extend development analysis to Sessions 1, 2, 4 and 5 only after Session 5 is collected. Session 4 descriptive analysis: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`.
 - Select features/model only if cross-session validation supports it.
 - Implement confidence, abstention, temporal logic and strict quality handling.
 - Freeze source, features, preprocessing, model and thresholds before any held-out evaluation. Session 3 has now been evaluated once; any revised model needs a new held-out session.

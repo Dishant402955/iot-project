@@ -60,3 +60,24 @@ Three batches yielded 49/50 valid strict CSI profiles: PRESENT rounds 3 and 4, a
 The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives are not included.
 
 **Evaluation hygiene:** this session must not be used for feature selection, threshold tuning, model selection, or other development decisions. Freeze the detector using Sessions 1 and 2 first, then evaluate once on Session 3. This is one controlled room/device setup and does not establish generalization to other environments.
+
+
+## Session 4: anonymized interleaved development capture
+
+`interleaved_session_4_anonymized.jsonl` contains a fourth completed five-round interleaved physical capture session. It is development data and is not a held-out evaluation.
+
+- 5 paired rounds, 10 batches total
+- 5 ABSENT batches and 5 PRESENT batches, alternating order by round
+- 500 capture attempts; 498 valid strict CSI profiles (99.6%)
+- ABSENT: 248/250 valid strict CSI profiles; PRESENT: 250/250
+- 498/500 target-attributed strict CSI profiles (99.6%)
+- RX-idle barrier: 500/500 (100%)
+- All 10 batches passed both configured acquisition gates
+- 52 active subcarriers per retained strict CSI profile
+- Wi-Fi channel 149, 20 MHz
+
+Two ABSENT batches (rounds 1 and 5) yielded 49/50 strict CSI profiles each; both still passed the configured acquisition gates. The shortfalls are retained as measured; no samples were fabricated or imputed.
+
+The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives and original labelled JSONL are not included.
+
+Session 4 joins Sessions 1 and 2 as development data. Session 3 remains reserved as the already-consumed one-time held-out evaluation and must not be used for feature selection, threshold tuning, model selection, or other development decisions. Session 4's descriptive ABSENT/PRESENT profile distance is not a detector-accuracy measurement and must not be treated as one.

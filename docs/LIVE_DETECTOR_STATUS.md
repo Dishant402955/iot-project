@@ -4,7 +4,7 @@
 
 ## Verdict
 
-The RTL8821CE acquisition and strict CSI extraction path is qualified for the tested physical setup. Three interleaved sessions have been collected and anonymized public feature copies have been released. However, the available development data does **not** support a reliable stationary-presence classifier. The project does not yet have a validated working occupancy detector.
+The RTL8821CE acquisition and strict CSI extraction path is qualified for the tested physical setup. Four interleaved sessions have been collected and anonymized public feature copies have been released. However, the available development data does **not** support a reliable stationary-presence classifier. The project does not yet have a validated working occupancy detector.
 
 The live tool tools/live_presence_detector.py is now a baseline-relative channel-anomaly monitor only. It always reports UNKNOWN_UNVALIDATED for occupancy and separately reports ANOMALY / NO_ANOMALY as channel diagnostics. It never emits PRESENT/ABSENT from anomaly thresholds. Its capture acceptance path requires the exact 52-tone set, structural CSI validity, target-source match, and RX-idle audit. It refuses to overwrite an existing baseline unless --replace-baseline is explicitly supplied.
 
@@ -22,17 +22,18 @@ The live tool tools/live_presence_detector.py is now a baseline-relative channel
 
 This is an acquisition-quality pass, not proof of presence detection. AP attribution remains a post-arm callback heuristic because CCA is not source-MAC-filtered.
 
-### Three interleaved sessions
+### Four interleaved sessions
 
 | Session | Purpose | Attempts | Valid strict CSI | Notes |
 |---|---|---:|---:|---|
 | 1 | Development | 500 | 500 | 10/10 batches pass both acquisition gates |
 | 2 | Development | 500 | 499 | 10/10 batches pass both acquisition gates |
 | 3 | Reserved held-out | 500 | 497 | 10/10 batches pass both acquisition gates; evaluated once after model freeze |
+| 4 | Development | 500 | 498 | 10/10 batches pass both acquisition gates; 248 ABSENT + 250 PRESENT profiles |
 
-All three sessions have 500 attempts, five paired rounds and ten batches. Every retained profile has 52 active tones. The anonymized public feature datasets and README are in data/public_dataset/ and have been pushed to GitHub. Original labelled JSONL and raw IQ remain local-only.
+All four sessions have 500 attempts, five paired rounds and ten batches. Every retained profile has 52 active tones. Anonymized feature datasets for Sessions 1-3 are already published; Session 4 has been anonymized and privacy-scanned and is included in the pending repository release. Original labelled JSONL and raw IQ remain local-only.
 
-### Development analysis: Sessions 1 and 2 only
+### Development analysis: Sessions 1 and 2 (Session 4 pending inclusion)
 
 - 1,000 attempts; 999 valid strict CSI profiles (500 ABSENT, 499 PRESENT).
 - 20/20 batches pass both acquisition gates; RX-idle is 100% in every batch.
@@ -68,8 +69,8 @@ See `docs/FINAL_PROJECT_REPORT.md` for the complete research report, acquisition
 ## Remaining work
 
 1. Verify and privately back up original labelled JSONL and raw IQ archives; the raw archive contents have not been fully verified or backed up off-device.
-2. Collect at least two more independent development sessions (Sessions 4 and 5), preferably on separate days/time blocks, with the same qualified physical setup.
-3. Collect Sessions 4 and 5 and extend grouped/session-transfer analysis to Sessions 1, 2, 4 and 5 only. Session 3 has already been used for its one-time benchmark evaluation and must not be reused for tuning.
+2. Collect one more independent development session (Session 5), preferably in a separate day/time block, with the same qualified physical setup.
+3. After Session 5, extend grouped/session-transfer analysis to Sessions 1, 2, 4 and 5 only. Session 4 acquisition summary: 498/500 strict CSI, 10/10 batches passed both gates, RX-idle 500/500; descriptive aggregate median-profile distance 0.1707 dB RMS. See docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md. Session 3 has already been used for its one-time benchmark evaluation and must not be reused for tuning.
 4. If new development evidence supports a revised model, implement explicit confidence/abstention and quality handling, freeze it, and obtain a new untouched held-out session.
 5. Integrate live inference and validate physical occupancy transitions only if a new independent held-out result supports it.
 

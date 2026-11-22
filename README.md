@@ -6,7 +6,7 @@ Academic research prototype investigating whether a Realtek RTL8821CE 1T1R adapt
 
 **The acquisition pipeline is qualified for the tested setup, but the collected development data does not establish reliable stationary-presence detection.** Do not report a working detector or accuracy claim.
 
-Three interleaved sessions have been collected. Sessions 1 and 2 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
+Four interleaved sessions have been collected. Sessions 1, 2 and 4 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
 
 The frozen nearest-centroid benchmark was evaluated once on Session 3: accuracy 0.70, sensitivity 0.60, specificity 0.80, and balanced accuracy 0.70 (TP=3, TN=4, FP=1, FN=2). It missed two of five occupied batches. This is not sufficient for reliable occupancy detection or deployment. The live tool `tools/live_presence_detector.py` remains a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
 
@@ -35,7 +35,7 @@ The isolated Devourer setup downloads build dependencies under `vendor/.local-de
 - [Live acquisition qualification](docs/LIVE_ACQUISITION_QUALIFICATION_20261122.md).
 - [CSI drift investigation](docs/CSI_DRIFT_INVESTIGATION_20261122.md).
 
-Anonymized feature datasets for Sessions 1, 2 and 3 are published under `data/public_dataset/`. Original labelled JSONL and raw IQ archives remain local-only and need a private encrypted off-device backup. Never publish them.
+Anonymized feature datasets for Sessions 1, 2, 3 and 4 are published under `data/public_dataset/`. Original labelled JSONL and raw IQ archives remain local-only and need a private encrypted off-device backup. Never publish them.
 
 ## Hardware and acquisition
 
@@ -50,7 +50,7 @@ Strict CSI gates: exactly 52 finite active tones; repeated L-LTF correlation >= 
 
 ## Remaining physical data collection
 
-Collect two additional independent development sessions (Sessions 4 and 5), preferably on separate days/time blocks, using the same frozen physical setup:
+Collect one additional independent development session (Session 5), preferably in a separate day/time block from Session 4, using the same frozen physical setup:
 
 ```bash
 cd ~/projects/iot-project
@@ -59,13 +59,13 @@ sudo vendor/.venv/bin/python tools/collect_presence_interleaved.py
 
 Each run performs five paired rounds (10 batches, 500 attempts), alternating ABSENT/PRESENT order, with 30-second settling per batch. Keep the laptop, AP, room layout, hotspot settings, and person position/orientation fixed. Preserve the labelled JSONL and matching raw archive.
 
-After Sessions 4 and 5, analyze Sessions 1, 2, 4 and 5 only:
+After Session 5, analyze Sessions 1, 2, 4 and 5 only:
 
 ```bash
 vendor/.venv/bin/python tools/analyze_presence_development.py \
   --session data/presence_dataset/interleaved_20261122_180724.jsonl \
   --session data/presence_dataset/interleaved_20261122_183204.jsonl \
-  --session data/presence_dataset/interleaved_SESSION4.jsonl \
+  --session data/presence_dataset/interleaved_20261122_200618.jsonl \
   --session data/presence_dataset/interleaved_SESSION5.jsonl
 ```
 
