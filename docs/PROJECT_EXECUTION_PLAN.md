@@ -14,7 +14,7 @@ Build and evaluate an academic stationary-room occupancy prototype using RTL8821
 | Strict CSI extraction | Qualified | 52 finite active tones; repeated-L-LTF alignment fix; strict gates unchanged |
 | Target AP attribution | Heuristic only | Post-arm RX callback and address audit; not hardware source-MAC filtering |
 | Interleaved Sessions 1 and 2 | Development data audited | 1,000 attempts, 999 valid strict CSI profiles, all 20 batches pass acquisition gates |
-| Interleaved Session 3 | Reserved held-out data | 500 attempts, 497 valid strict CSI profiles; must remain untouched until a detector is frozen |
+| Interleaved Session 3 | Reserved held-out data | 500 attempts, 497 valid strict CSI profiles; evaluated once after benchmark freeze; no further tuning |
 | Occupancy separability | Not established | Development grouped batch evaluation has 0.80 balanced accuracy but 0.60 sensitivity; cross-session transfer has 0.50 balanced accuracy and 0 sensitivity |
 | Final occupancy detector | Not available | Existing live script is a baseline-relative anomaly indicator, not a validated occupancy classifier |
 | Private original-data backup | Not verified | Public anonymized feature datasets are on GitHub; labelled originals/raw IQ need private off-device backup |
@@ -41,7 +41,7 @@ See docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md and its machine-readable JSON
 
 ## Frozen benchmark model
 
-A simple batch-median nearest-centroid benchmark is frozen from Sessions 1 and 2 in `models/presence_centroid_baseline_s1_s2_v1.json`. It is not a deployment candidate. Its sole purpose is a one-time held-out benchmark on Session 3 without further tuning. See `docs/BASELINE_MODEL_FREEZE.md`.
+A simple batch-median nearest-centroid benchmark was frozen from Sessions 1 and 2 in `models/presence_centroid_baseline_s1_s2_v1.json` and evaluated exactly once on Session 3. Result: TP=3, TN=4, FP=1, FN=2; accuracy 0.70, sensitivity 0.60, specificity 0.80, balanced accuracy 0.70. CSI availability was 497/500 and all 10 batches passed acquisition gates. This is not a deployment candidate. Do not tune on Session 3. See `docs/BASELINE_MODEL_FREEZE.md` and `docs/HELD_OUT_EVALUATION_SESSION3_20261122.md`.
 
 ## Remaining milestones
 
@@ -51,7 +51,7 @@ The anonymized public feature datasets are committed to GitHub. Original labelle
 
 ### 2. Obtain more development evidence
 
-Collect at least two additional independent interleaved sessions (Sessions 4 and 5), preferably on separate days/time blocks, using the same qualified physical setup and protocol. These can join Sessions 1 and 2 as development data. Session 3 remains reserved for the one-time held-out evaluation after the complete detector is frozen.
+Collect at least two additional independent interleaved sessions (Sessions 4 and 5), preferably on separate days/time blocks, using the same qualified physical setup and protocol. These join Sessions 1 and 2 as development data. Session 3 has already been evaluated once with the frozen benchmark and cannot be reused for tuning.
 
 Physical capture must run from the laptop's physical console only:
 
@@ -68,13 +68,13 @@ Extend the development analysis to Sessions 1, 2, 4 and 5. Compare within-condit
 
 ### 4. Implement and freeze a detector only if justified
 
-A valid detector needs a reproducible feature pipeline, trained model or statistical rule, confidence/abstention behavior, temporal state logic, and explicit quality/link-health checks. Insufficient CSI must never become ABSENT. Freeze source, preprocessing, features, thresholds, model artifact, and configuration before evaluating Session 3.
+A valid future detector needs a reproducible feature pipeline, trained model or statistical rule, confidence/abstention behavior, temporal state logic, and explicit quality/link-health checks. Insufficient CSI must never become ABSENT. The frozen benchmark has already failed to establish adequate held-out performance; a revised model needs new development data and a new untouched held-out session.
 
 The live tool tools/live_presence_detector.py is a channel-anomaly monitor only. It always reports UNKNOWN_UNVALIDATED for occupancy, separately prints channel-anomaly diagnostics, enforces exact tones/structural CSI/target-source/RX-idle gates, and refuses to overwrite an existing baseline without the explicit --replace-baseline flag. The development analysis accepts multiple development sessions via repeated --session flags and rejects held-out Session 3 by SHA-256.
 
 ### 5. One-time held-out evaluation
 
-After freeze, evaluate Session 3 once. Report confusion matrix, sensitivity, specificity, balanced accuracy, precision, valid-CSI availability, UNKNOWN rate, per-round performance, uncertainty, and limitations. If the result is weak, report it without tuning on Session 3. Any subsequent model change requires a new untouched held-out session.
+Completed: Session 3 was evaluated once after the benchmark freeze. It produced TP=3, TN=4, FP=1, FN=2; balanced accuracy 0.70 and sensitivity 0.60. No tuning was performed. Any subsequent model change requires a new untouched held-out session.
 
 ### 6. Live hardware integration and final release
 
@@ -87,13 +87,17 @@ Only after offline evidence justifies the detector, integrate it into continuous
 - Never overwrite data/live_presence_baseline.json without explicit approval.
 - Keep room-specific baseline, labelled data, raw IQ, and derived private session files out of GitHub.
 - Never claim accuracy or deployment readiness from development-only or within-session results.
-- Do not inspect or tune against Session 3 before the detector is frozen.
+- Session 3 was evaluated once after benchmark freeze. Never use it for further feature/model/threshold tuning.
 - No VFIO binding, driver reload, or physical capture through SSH/remote coding agent.
 - No destructive Git operations or cleanup of user data.
 
+## One-time held-out result
+
+Session 3 was evaluated once with the frozen model. It missed two of five PRESENT batches and generated one false positive among five ABSENT batches. No further tuning on Session 3 is permitted. A revised model requires new development sessions and a new untouched held-out session.
+
 ## Final project report
 
-`docs/FINAL_PROJECT_REPORT.md` records the completed software/research work and the negative detector result. The project is not an operational occupancy detector. Remaining work is physical data collection, private raw-data backup, and any future held-out evaluation justified by new development evidence.
+`docs/FINAL_PROJECT_REPORT.md` records the completed software/research work and the negative detector result. The project is not an operational occupancy detector. Remaining work is physical data collection, private raw-data backup, and a new untouched held-out evaluation only if a revised detector is justified.
 
 ## Authoritative documents
 

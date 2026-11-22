@@ -6,9 +6,9 @@ Academic research prototype investigating whether a Realtek RTL8821CE 1T1R adapt
 
 **The acquisition pipeline is qualified for the tested setup, but the collected development data does not establish reliable stationary-presence detection.** Do not report a working detector or accuracy claim.
 
-Three interleaved sessions have been collected. Sessions 1 and 2 are development data; Session 3 is reserved as held-out and has not been used for model selection. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
+Three interleaved sessions have been collected. Sessions 1 and 2 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
 
-A simple nearest-centroid benchmark has now been frozen from Sessions 1 and 2 for a one-time Session 3 evaluation using `tools/evaluate_presence_heldout.py`; it is not a deployment candidate. The live tool `tools/live_presence_detector.py` remains a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
+The frozen nearest-centroid benchmark was evaluated once on Session 3: accuracy 0.70, sensitivity 0.60, specificity 0.80, and balanced accuracy 0.70 (TP=3, TN=4, FP=1, FN=2). It missed two of five occupied batches. This is not sufficient for reliable occupancy detection or deployment. The live tool `tools/live_presence_detector.py` remains a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
 
 ## Clone and build
 
@@ -25,6 +25,7 @@ The isolated Devourer setup downloads build dependencies under `vendor/.local-de
 
 - [Final project report](docs/FINAL_PROJECT_REPORT.md): research question, acquisition method, results, limitations, and final conclusion.
 - [Frozen benchmark model](docs/BASELINE_MODEL_FREEZE.md): fixed Session 1/2 centroid model and held-out evaluation protocol.
+- [One-time held-out result](docs/HELD_OUT_EVALUATION_SESSION3_20261122.md): Session 3 metrics and per-batch predictions.
 - [Development analysis](docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md): Sessions 1 and 2 only, with grouped and cross-session evaluation.
 - [Live detector status](docs/LIVE_DETECTOR_STATUS.md): acquisition evidence, detector semantics, and next milestones.
 - [Project execution plan](docs/PROJECT_EXECUTION_PLAN.md): authoritative milestones and integrity constraints.
@@ -68,7 +69,7 @@ vendor/.venv/bin/python tools/analyze_presence_development.py \
   --session data/presence_dataset/interleaved_SESSION5.jsonl
 ```
 
-The analysis tool rejects the reserved Session 3 by its SHA-256 even if the file is renamed. Session 3 must remain untouched until a complete detector is frozen. If independent-session validation still fails, the scientifically correct outcome is that this hardware/setup did not demonstrate reliable stationary-presence detection.
+The development analysis tool rejects Session 3 by its SHA-256 even if the file is renamed. Session 3 has already been used for the single frozen-model evaluation and must never be used for further tuning. Any revised model requires new development sessions and a new untouched held-out session.
 
 ## Reproducible checks
 

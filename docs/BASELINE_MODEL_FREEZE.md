@@ -6,7 +6,7 @@
 
 ## Why this model was frozen
 
-The Sessions 1/2 development diagnostic is weak (grouped sensitivity 0.60) and cross-session transfer fails (sensitivity 0.00 in both directions). No model is justified for deployment. To complete an auditable independent benchmark, the simple nearest-centroid procedure already evaluated during development was frozen without tuning and will be evaluated once on reserved Session 3. The result cannot be used to tune this model.
+The Sessions 1/2 development diagnostic is weak (grouped sensitivity 0.60) and cross-session transfer fails (sensitivity 0.00 in both directions). No model is justified for deployment. To complete an auditable independent benchmark, the simple nearest-centroid procedure already evaluated during development was frozen without tuning and evaluated once on Session 3. The result cannot be used to tune this model.
 
 ## Training data integrity
 
@@ -39,6 +39,6 @@ No features, thresholds, hyperparameters, or preprocessing are selected using Se
 - `held_out_session_3_used` is false in the artifact.
 - Model deployment status is `NOT_VALIDATED_NOT_FOR_OCCUPANCY_DECISIONS`.
 
-## One-time evaluation rule
+## One-time evaluation result
 
-Run `tools/evaluate_presence_heldout.py` exactly once after its evaluator commit is published. The evaluator verifies the exact Session 3 source SHA-256 and frozen model hash, loads only the frozen model, refuses to overwrite an existing evaluation result, and emits confusion matrix/sensitivity/specificity/balanced accuracy plus CSI availability. The evaluator has synthetic unit tests; these do not access Session 3. Do not tune or retrain after seeing the held-out result. If a model change is later made, it requires a new untouched held-out session.
+The one-time evaluation has been completed and is recorded in `docs/HELD_OUT_EVALUATION_SESSION3_20261122.md` and `.json`. It produced TP=3, TN=4, FP=1, FN=2; accuracy 0.70, sensitivity 0.60, specificity 0.80, and balanced accuracy 0.70. Do not run `tools/evaluate_presence_heldout.py` again. It refuses to overwrite the existing result. The evaluator verified the exact Session 3 source SHA-256 and frozen model hash and loaded only the frozen model. Its synthetic unit tests do not access Session 3. Do not tune or retrain after seeing the held-out result. If a model change is later made, it requires a new untouched held-out session.

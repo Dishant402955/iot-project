@@ -28,7 +28,7 @@ This is an acquisition-quality pass, not proof of presence detection. AP attribu
 |---|---|---:|---:|---|
 | 1 | Development | 500 | 500 | 10/10 batches pass both acquisition gates |
 | 2 | Development | 500 | 499 | 10/10 batches pass both acquisition gates |
-| 3 | Reserved held-out | 500 | 497 | 10/10 batches pass both acquisition gates; do not inspect before freeze |
+| 3 | Reserved held-out | 500 | 497 | 10/10 batches pass both acquisition gates; evaluated once after model freeze |
 
 All three sessions have 500 attempts, five paired rounds and ten batches. Every retained profile has 52 active tones. The anonymized public feature datasets and README are in data/public_dataset/ and have been pushed to GitHub. Original labelled JSONL and raw IQ remain local-only.
 
@@ -53,6 +53,10 @@ The matched-filter extractor could select the second of the two repeated 64-samp
 - Drift indicators (common gain, spectral slope, tone spread, RSSI, CFO) remain diagnostics/nuisance variables until validated as features.
 - The empty-room baseline is unchanged and must not be overwritten without explicit approval.
 
+## One-time held-out benchmark: Session 3
+
+The frozen Sessions 1/2 nearest-centroid benchmark was evaluated once on Session 3. Confusion matrix: TP=3, TN=4, FP=1, FN=2. Accuracy=0.70, sensitivity=0.60, specificity=0.80, balanced accuracy=0.70. CSI availability was 497/500 (99.4%); all 10 batches passed acquisition gates. This is insufficient for reliable occupancy detection. Two of five PRESENT batches were missed and one of five ABSENT batches was falsely marked PRESENT. Do not tune on Session 3. Full result: `docs/HELD_OUT_EVALUATION_SESSION3_20261122.md`.
+
 ## Frozen benchmark model
 
 A non-deployable batch-median nearest-centroid benchmark is frozen from Sessions 1 and 2 solely for a one-time Session 3 evaluation. It has no calibrated confidence/abstention and must not drive occupancy decisions. Specification: `docs/BASELINE_MODEL_FREEZE.md`.
@@ -65,8 +69,8 @@ See `docs/FINAL_PROJECT_REPORT.md` for the complete research report, acquisition
 
 1. Verify and privately back up original labelled JSONL and raw IQ archives; the raw archive contents have not been fully verified or backed up off-device.
 2. Collect at least two more independent development sessions (Sessions 4 and 5), preferably on separate days/time blocks, with the same qualified physical setup.
-3. Extend grouped/session-transfer analysis to Sessions 1, 2, 4 and 5 only. Do not use Session 3 for feature or threshold selection.
-4. If development evidence supports a stable model, implement explicit confidence/abstention and quality handling, freeze the complete detector, and evaluate Session 3 once.
-5. Integrate live inference and validate physical occupancy transitions only if offline held-out performance supports it.
+3. Collect Sessions 4 and 5 and extend grouped/session-transfer analysis to Sessions 1, 2, 4 and 5 only. Session 3 has already been used for its one-time benchmark evaluation and must not be reused for tuning.
+4. If new development evidence supports a revised model, implement explicit confidence/abstention and quality handling, freeze it, and obtain a new untouched held-out session.
+5. Integrate live inference and validate physical occupancy transitions only if a new independent held-out result supports it.
 
 If additional development data still fails cross-session validation, report that this hardware/setup did not demonstrate reliable stationary-presence detection. Do not tune against the held-out session. The development analysis accepts repeated --session arguments for Sessions 4 and 5 and rejects the held-out Session 3 by its SHA-256, even if renamed.

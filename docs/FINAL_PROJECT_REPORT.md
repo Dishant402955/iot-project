@@ -8,7 +8,7 @@
 
 This project investigated whether a Realtek RTL8821CE 1T1R Wi-Fi adapter could provide channel-state information (CSI) suitable for distinguishing a stationary person from an empty room. A PCIe/VFIO-based raw-IQ capture path, strict legacy L-LTF CSI extraction, acquisition-quality checks, an interleaved labelled collection protocol, offline analysis, and an anonymized feature-data release were implemented.
 
-The tested acquisition setup produced high-yield strict CSI. However, grouped development analysis across two independent interleaved sessions showed poor cross-session transfer: the nearest-centroid diagnostic achieved 0.50 balanced accuracy and 0.00 sensitivity in both transfer directions. The system therefore does not demonstrate a reliable occupancy signal. The live utility has been hardened to report channel anomalies only and always return `UNKNOWN_UNVALIDATED` for occupancy. The reserved third session has not been used for tuning or evaluation.
+The tested acquisition setup produced high-yield strict CSI. However, grouped development analysis across two independent interleaved sessions showed poor cross-session transfer: the nearest-centroid diagnostic achieved 0.50 balanced accuracy and 0.00 sensitivity in both transfer directions. The system therefore does not demonstrate a reliable occupancy signal. The live utility has been hardened to report channel anomalies only and always return `UNKNOWN_UNVALIDATED` for occupancy. The reserved third session was not used for tuning and was evaluated exactly once after the benchmark model was frozen.
 
 ## 2. Research question and scope
 
@@ -61,7 +61,7 @@ Each session used five rounds, ten batches, and 50 attempts per batch (500 attem
 | 2 | Development | 500 | 499 | 10/10 batches pass |
 | 3 | Reserved held-out | 500 | 497 | 10/10 batches pass |
 
-Sessions 1 and 2 are the only data used by the current development analysis. Session 3 remains reserved and must not be opened for feature selection, threshold tuning, or model selection. Its source SHA-256 is `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`.
+Sessions 1 and 2 are the only data used by development analysis/model selection. Session 3 was evaluated exactly once after the benchmark was frozen; it was not used for training, feature selection, or threshold tuning. Its source SHA-256 is `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`.
 
 Anonymized feature copies of all three sessions and a dataset README are published under `data/public_dataset/`. They omit BSSID, exact wall-clock timestamps, and local filesystem paths. Raw IQ and original labelled JSONL are excluded from the public repository and still require private encrypted off-device backup.
 
@@ -98,9 +98,19 @@ No ROC AUC or confidence interval is reported: the current diagnostic produces h
 
 ## 7. Frozen research benchmark
 
-A fixed batch-median nearest-centroid benchmark was frozen using exactly 20 batch examples from Sessions 1 and 2 (ten per class). It uses the per-tone batch median, training-only standardization, and two class centroids with squared Euclidean distance. The frozen artifact is `models/presence_centroid_baseline_s1_s2_v1.json` (SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`). Session 3 was not used. This model is frozen only to obtain one independent benchmark result; it is explicitly not a deployment candidate. The freeze protocol is documented in `docs/BASELINE_MODEL_FREEZE.md`. The one-time evaluator is `tools/evaluate_presence_heldout.py`; it verifies the model and Session 3 hashes and refuses to rerun if either evaluation output already exists.
+A fixed batch-median nearest-centroid benchmark was frozen using exactly 20 batch examples from Sessions 1 and 2 (ten per class). It uses the per-tone batch median, training-only standardization, and two class centroids with squared Euclidean distance. The frozen artifact is `models/presence_centroid_baseline_s1_s2_v1.json` (SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`). Session 3 was not used during training. This model was frozen only to obtain one independent benchmark result; it is explicitly not a deployment candidate. The freeze protocol is documented in `docs/BASELINE_MODEL_FREEZE.md`. The one-time evaluator `tools/evaluate_presence_heldout.py` verifies the model and Session 3 hashes and refuses to rerun if either evaluation output already exists.
 
-## 8. Live tool safety hardening
+## 8. Held-out evaluation: Session 3
+
+The frozen model was evaluated exactly once on Session 3 after the freeze and evaluator commits were published. The evaluator verified the model and source hashes, used no training or tuning on Session 3, and wrote `docs/HELD_OUT_EVALUATION_SESSION3_20261122.md` plus its JSON result.
+
+| TP | TN | FP | FN | Accuracy | Sensitivity | Specificity | Balanced accuracy | Precision | F1 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3 | 4 | 1 | 2 | 0.70 | 0.60 | 0.80 | 0.70 | 0.75 | 0.667 |
+
+CSI availability was 497/500 (99.4%); all 10/10 batches passed acquisition gates. The classifier missed two of five PRESENT batches and produced one false positive among five ABSENT batches. This is not sufficient for reliable occupancy detection. The sample is only ten batches from one held-out session; no cross-room/person/device generalization or stable operational performance can be inferred. The result must not be used to tune this model. A changed model requires a new untouched held-out session.
+
+## 9. Live tool safety hardening
 
 Because channel anomalies and spectral drift are not occupancy-specific, `tools/live_presence_detector.py` is now a channel-anomaly monitor only:
 
@@ -113,7 +123,7 @@ Because channel anomalies and spectral drift are not occupancy-specific, `tools/
 
 The existing empty-room baseline was not modified. `INSUFFICIENT_CSI` remains distinct from ABSENT and must never be treated as evidence that the room is empty.
 
-## 9. Reproducibility and tests
+## 10. Reproducibility and tests
 
 From the repository root:
 
@@ -128,11 +138,11 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 git diff --check
 ```
 
-Latest offline verification: 33 Python unit tests passed; L-LTF self-test passed; CSI-series self-test passed; Python compilation passed; capture shell syntax passed; existing C++ test executable passed; baseline hash unchanged. A fresh CMake rebuild/CTest could not be verified in the remote workspace because a working CMake installation was unavailable (the bundled binary could not load `libjsoncpp.so.25`).
+Latest offline verification before the held-out run: 37 Python unit tests passed; L-LTF self-test passed; CSI-series self-test passed; Python compilation passed; capture shell syntax passed; existing C++ test executable passed; baseline hash unchanged. A fresh CMake rebuild/CTest could not be verified in the remote workspace because a working CMake installation was unavailable (the bundled binary could not load `libjsoncpp.so.25`).
 
-## 10. Limitations and remaining physical work
+## 11. Limitations and remaining physical work
 
-1. Only two sessions are currently available for development analysis; Session 3 is reserved held-out.
+1. Only two sessions are currently available for development analysis; Session 3 has been evaluated once as the held-out benchmark.
 2. Cross-session sensitivity is zero in both transfer directions for the current diagnostic.
 3. The AP-source audit is heuristic rather than hardware source filtering.
 4. CSI response is sensitive to link state, spectral slope, signal level, multipath, and environmental drift.
@@ -140,10 +150,10 @@ Latest offline verification: 33 Python unit tests passed; L-LTF self-test passed
 6. Original labelled data and raw IQ archives have not been verified as backed up off-device.
 7. Physical entry/exit testing and driver restoration after repeated live monitor operation still require local console execution.
 
-Two additional independent development sessions (Sessions 4 and 5) are needed, preferably on separate days/time blocks. Analyze Sessions 1, 2, 4, and 5 only. The analysis tool accepts repeated `--session` arguments and rejects Session 3 by its source SHA-256 even if renamed. If cross-session validation remains weak, the appropriate project conclusion is that this hardware/setup did not demonstrate reliable stationary-presence detection. A new untouched held-out session would then be required for any revised detector.
+Two additional independent development sessions (Sessions 4 and 5) are needed, preferably on separate days/time blocks. Analyze Sessions 1, 2, 4, and 5 only. The analysis tool accepts repeated `--session` arguments and rejects Session 3 by its source SHA-256 even if renamed. If cross-session validation remains weak, the appropriate project conclusion is that this hardware/setup did not demonstrate reliable stationary-presence detection. Any revised detector requires a new untouched held-out session.
 
-## 11. Final conclusion
+## 12. Final conclusion
 
 The project successfully delivered a repeatable CSI acquisition path, strict extraction and quality gates, interleaved labelled datasets, anonymized public feature releases, reproducible development analysis, safety-oriented live-tool behavior, and project documentation.
 
-**It did not deliver a validated stationary-presence classifier.** The available development evidence does not support one. The correct engineering result is an acquisition-qualified research prototype with occupancy output deliberately abstained, pending additional independent physical data and a successful held-out evaluation.
+**It did not deliver a validated stationary-presence classifier.** The available development evidence does not support one. The correct engineering result is an acquisition-qualified research prototype with occupancy output deliberately abstained. The one-time held-out benchmark produced 0.70 balanced accuracy and 0.60 sensitivity, which is insufficient for deployment. Additional independent physical data and a new held-out session would be required for any revised model.

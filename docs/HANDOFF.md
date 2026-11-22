@@ -9,7 +9,7 @@
 
 **CSI acquisition works for the tested configuration; a reliable occupancy detector has not been demonstrated.** Do not deploy or claim presence-detection accuracy yet.
 
-Three five-round interleaved physical sessions were collected. Sessions 1 and 2 are development data. Session 3 is reserved as held-out and has not been used in the latest development analysis. Anonymized public feature copies of all three sessions and their README are published on GitHub. Original labelled JSONL and raw IQ are local-only.
+Three five-round interleaved physical sessions were collected. Sessions 1 and 2 are development data. Session 3 was reserved as held-out, was excluded from development analysis/model selection, and was evaluated exactly once after freezing the benchmark model. Anonymized public feature copies of all three sessions and their README are published on GitHub. Original labelled JSONL and raw IQ are local-only.
 
 The development analysis found 999 valid strict CSI profiles from 1,000 attempts across Sessions 1 and 2. All 20 batches passed both acquisition gates. A batch-median nearest-centroid grouped evaluation produced 0.80 balanced accuracy but only 0.60 sensitivity. More importantly, cross-session transfer in both directions produced 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is a failure to establish robust session-independent occupancy information, not a usable detector.
 
@@ -26,7 +26,7 @@ The development analysis found 999 valid strict CSI profiles from 1,000 attempts
   - data/public_dataset/interleaved_session_2_anonymized.jsonl
   - data/public_dataset/interleaved_session_3_anonymized.jsonl
   - data/public_dataset/README.md
-- Added tools/analyze_presence_development.py, pinned to Sessions 1 and 2, plus unit tests and development analysis report. It deliberately refuses alternate input paths to protect Session 3.
+- Added tools/analyze_presence_development.py, pinned to Sessions 1 and 2, plus unit tests and development analysis report. It accepts explicit development sessions but rejects Session 3 by SHA-256 to protect it from tuning.
 
 ## Latest development analysis
 
@@ -39,7 +39,7 @@ Machine-readable output: docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.json
 | Train S1 / test S2 | 0.50 | 0.00 | 1.00 | 0.50 |
 | Train S2 / test S1 | 0.50 | 0.00 | 1.00 | 0.50 |
 
-Do not freeze a classifier from this result. The cross-session test is the key failure. Session 3 remains untouched.
+Do not deploy a classifier from this result. The cross-session test is the key failure. Session 3 was subsequently evaluated once with a frozen baseline benchmark, without tuning.
 
 ## Hardware and capture constraints
 
@@ -71,7 +71,7 @@ Strict CSI gates remain: exactly 52 finite tones; repeated L-LTF correlation >=0
 - Extend development analysis to Sessions 1, 2, 4 and 5 only.
 - Select features/model only if cross-session validation supports it.
 - Implement confidence, abstention, temporal logic and strict quality handling.
-- Freeze source, features, preprocessing, model and thresholds before evaluating Session 3 once.
+- Freeze source, features, preprocessing, model and thresholds before any held-out evaluation. Session 3 has now been evaluated once; any revised model needs a new held-out session.
 - Produce held-out report, live integration, tests and final documentation if the evidence supports proceeding.
 
 ## Data integrity and backup caveat
@@ -127,13 +127,13 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 - Live CSI admission now requires the exact 52 active-tone set, `csi_structurally_valid=true`, `target_source_match=true`, and `rx_idle_satisfied=true`, in addition to the L-LTF correlation checks. Missing audit fields fail closed.
 - Existing baseline overwrite is refused by default. `--replace-baseline` is an explicit override; do not use it without approval and a verified backup. The existing baseline was not changed.
 - Development analysis now accepts repeated `--session` arguments, supports future Sessions 4 and 5, and rejects reserved Session 3 using its exact source SHA-256 even if renamed. It requires at least two sessions inside the repository.
-- README and physical runbook now describe Sessions 1/2 as development, Session 3 as reserved, and Sessions 4/5 as next development collection. Historical smoke-test docs are labelled as superseded.
+- README and physical runbook now describe Sessions 1/2 as development, Session 3 as evaluated once with a frozen benchmark, and Sessions 4/5 as next development collection. Historical smoke-test docs are labelled as superseded.
 
 
 ## Final report and latest verification
 
 - Added `docs/FINAL_PROJECT_REPORT.md` covering the research question, hardware/method, three sessions, development metrics, limitations, safety hardening, reproducibility, and the negative detector conclusion.
-- Current offline test suite: 33 Python tests passed; L-LTF self-test, CSI-series self-test, Python compilation, shell syntax, and existing C++ test executable passed.
+- Current offline test suite before the held-out evaluation: 37 Python tests passed; L-LTF self-test, CSI-series self-test, Python compilation, shell syntax, and existing C++ test executable passed.
 - Empty-room baseline SHA-256 remains `2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74`.
 - No physical capture was run during this software-only pass. Sessions 4 and 5, private raw-data backup, and live hardware transition checks remain user-console dependencies.
 
@@ -143,5 +143,15 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 - Froze `profile_median_nearest_centroid_sessions_1_2_v1` using exactly 20 batch medians (10 ABSENT, 10 PRESENT) from Sessions 1 and 2.
 - Model artifact: `models/presence_centroid_baseline_s1_s2_v1.json`; SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`.
 - Freeze script verifies exact source hashes for Sessions 1 and 2 and refuses alternate training inputs. Session 3 was not used.
-- Model is explicitly `NOT_VALIDATED_NOT_FOR_OCCUPANCY_DECISIONS`. It is frozen only as a benchmark for a one-time independent Session 3 evaluation.
+- Model is explicitly `NOT_VALIDATED_NOT_FOR_OCCUPANCY_DECISIONS`. It was frozen only as a benchmark for a one-time independent Session 3 evaluation.
 - Freeze specification: `docs/BASELINE_MODEL_FREEZE.md`. The one-time evaluator `tools/evaluate_presence_heldout.py` is implemented with a strict source/model hash check and refuses to overwrite existing results. It is being committed separately before execution.
+
+
+## One-time held-out evaluation completed (2026-11-22)
+
+- Evaluated frozen model `profile_median_nearest_centroid_sessions_1_2_v1` exactly once on Session 3 after verifying both immutable source/model hashes.
+- Results: TP=3, TN=4, FP=1, FN=2; accuracy 0.70, sensitivity 0.60, specificity 0.80, balanced accuracy 0.70, precision 0.75, F1 0.667.
+- CSI availability: 497/500 (99.4%); acquisition gates passed 10/10 batches; zero insufficient-CSI batches.
+- It missed 2/5 PRESENT batches and falsely marked 1/5 ABSENT batches PRESENT. This is not reliable occupancy detection. Do not tune on Session 3 or rerun the evaluator.
+- Reports: `docs/HELD_OUT_EVALUATION_SESSION3_20261122.md` and `.json`. The evaluator refuses to overwrite existing outputs.
+- Any revised model requires new development data and a new untouched held-out session.
