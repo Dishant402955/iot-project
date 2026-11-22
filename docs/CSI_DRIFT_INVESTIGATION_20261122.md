@@ -84,7 +84,7 @@ Therefore, linear detrending is currently a useful nuisance diagnostic, not a pr
 
 1. Added `tools/analyze_live_presence_drift.py`. It replays strict CSI gates and reports per-capture spectral slope, raw and detrended anomaly, RX RSSI index, CSI level/spread, CFO, L-LTF start, RX frame length/rate, and raw-IQ signal/noise proxies. It emits CSV and JSON. It explicitly does not classify occupancy.
 2. Saved analysis outputs under `data/presence_analysis/live_drift_20261122.csv` and `.json`.
-3. Added `profile_shape_diagnostics()` to `tools/live_presence_detector.py`. Live output now includes current spectral slope and tone spread alongside the existing scores. These values are diagnostic only and do not affect PRESENT/ABSENT state.
+3. Added `profile_shape_diagnostics()` to `tools/live_presence_detector.py`. Live output includes current spectral slope and tone spread alongside channel-anomaly diagnostics. After development-session cross-validation failed, the live tool was hardened to always report `UNKNOWN_UNVALIDATED` for occupancy; no anomaly score affects a PRESENT/ABSENT state.
 4. New baselines created by future explicit calibration will record schema version 2 and calibration distributions for spectral slope and tone spread. The existing baseline file was not edited or replaced; its slope reference is derived from its stored median profile because its original per-capture calibration profiles are unavailable.
 5. Added unit tests for the analysis functions and live shape diagnostics.
 

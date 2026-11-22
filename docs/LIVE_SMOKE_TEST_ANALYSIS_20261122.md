@@ -1,5 +1,7 @@
 # Live presence smoke test analysis - 2026-11-22
 
+> **Historical reporting note:** The CLI behavior described in this original experiment was superseded after development Sessions 1 and 2 failed cross-session validation. The current live tool is diagnostic-only and always reports `UNKNOWN_UNVALIDATED` for occupancy. It no longer emits PRESENT/ABSENT labels from anomaly thresholds.
+
 ## Scope
 
 A controlled two-point smoke test used the existing 40-profile empty-room baseline in `data/live_presence_baseline.json`. The user confirmed the physical setup was unchanged and was stationary near the laptop for the occupied batch. Both runs used `--skip-calibration --once`; neither recalibrated or overwrote the baseline.
@@ -42,12 +44,7 @@ The occupied batch does not show greater adjacent-profile variation: its median 
 
 The old CLI printed `ABSENT` for both runs because `--once` starts a fresh `PresenceState`, which has only one vote. The smoother confirms presence only after at least two positive batches in a rolling three-batch window. That output concealed the fact that each batch had crossed the raw anomaly threshold.
 
-The detector now prints:
-- `raw_signal=TRIGGER|CLEAR` for the current batch's anomaly/motion threshold result;
-- `smoothed=PRESENT|NOT_PRESENT` for the hysteresis/hold state;
-- leading `PENDING` when the raw signal triggers but temporal smoothing has not confirmed presence.
-
-This correction changes reporting only. It does not alter the threshold, smoothing rule, CSI acceptance gates, minimum CSI count, or baseline.
+At the time, the detector printed a raw trigger separately from its temporal smoother. Subsequent development-session transfer failure showed that even smoothed anomaly states were not occupancy evidence. The current tool therefore prints `UNKNOWN_UNVALIDATED`, `occupancy_decision=UNKNOWN`, and a separate `channel_anomaly=ANOMALY|NO_ANOMALY` diagnostic. No threshold or smoothing state is translated into occupancy.
 
 ## Engineering conclusion
 

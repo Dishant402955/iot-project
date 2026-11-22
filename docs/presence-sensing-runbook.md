@@ -59,7 +59,7 @@ Each condition is one batch of 50 capture attempts with 30 seconds settling. Tot
 
 Follow each prompt exactly. At completion, save the printed JSONL path and terminal summary. Raw IQ, RX logs, CSI series, audits, manifests, and diagnostics are archived under the matching `data/presence_dataset_raw/interleaved_.../` directory. Do not delete, rename, or overwrite the original or raw archive.
 
-Repeat for three new independent sessions, ideally on separate days/time blocks. Existing 2026-11-22 session plus new sessions 1 and 2 are development data. New session 3 is reserved untouched for the final held-out evaluation.
+Sessions 1 and 2 are the current development data. Session 3 (source JSONL SHA-256 `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`) is reserved held-out data and must not be opened for feature selection or tuning. Collect two more independent development sessions, Sessions 4 and 5, ideally on separate days/time blocks. Analyze Sessions 1, 2, 4 and 5 only. The development-analysis tool rejects Session 3 by content hash even if renamed.
 
 ## Offline analysis
 
@@ -80,11 +80,11 @@ Return the exact JSONL path and terminal summary after each session. Preserve th
 
 ## Existing evidence and interpretation
 
-The 2026-11-22 five-round session yielded 497/500 strict CSI after the L-LTF alignment correction, 495/500 target-attributed strict CSI, RX-idle 500/500, and 10/10 acquisition-gate-passing batches. However, grouped-by-round classification was unstable: best RBF SVM balanced accuracy 0.675 and sensitivity 0.565. This is not deployable or independently validated. See `LIVE_ACQUISITION_QUALIFICATION_20261122.md`, `LTF_ALIGNMENT_RECOVERY_20261122.md`, and `PRESENCE_CLASSIFIER_READINESS_20261122.md`.
+Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts; all 20 batches passed acquisition gates. A grouped batch-median nearest-centroid diagnostic produced 0.80 balanced accuracy and 0.60 sensitivity, but both cross-session transfer directions produced 0.50 balanced accuracy and 0.00 sensitivity. This does not establish an occupancy detector. Session 3 remains untouched. See `PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md`, `LIVE_ACQUISITION_QUALIFICATION_20261122.md`, and `LTF_ALIGNMENT_RECOVERY_20261122.md`.
 
 ## Integrity and safety
 
-- Never overwrite `data/live_presence_baseline.json`.
+- Never overwrite `data/live_presence_baseline.json`; the live tool now refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied.
 - Keep baseline, labelled data, raw IQ archives, and private analysis outputs out of GitHub.
 - Never lower strict CSI gates to increase yield.
 - Never interpret insufficient CSI as absence.

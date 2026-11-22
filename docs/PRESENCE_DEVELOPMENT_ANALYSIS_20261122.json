@@ -1,5 +1,5 @@
 {
-  "analysis_scope": "development sessions 1 and 2 only; held-out session 3 not opened or analyzed",
+  "analysis_scope": "2 explicitly supplied development sessions; held-out Session 3 rejected by source hash and filename",
   "sessions": [
     "data/presence_dataset/interleaved_20261122_180724.jsonl",
     "data/presence_dataset/interleaved_20261122_183204.jsonl"
@@ -24,7 +24,7 @@
     "balanced_accuracy": 0.8
   },
   "session_transfer_metrics": {
-    "train_session_1_test_session_2": {
+    "train_sessions_[2]_test_session_1": {
       "n_batches": 10,
       "tp": 0,
       "tn": 5,
@@ -35,7 +35,7 @@
       "specificity": 1.0,
       "balanced_accuracy": 0.5
     },
-    "train_session_2_test_session_1": {
+    "train_sessions_[1]_test_session_2": {
       "n_batches": 10,
       "tp": 0,
       "tn": 5,
@@ -130,7 +130,7 @@
     }
   ],
   "method": "For each batch, take the per-tone median across valid CSI profiles. Standardize using training batches only, fit two class centroids, and classify the held-out paired round by nearest centroid. The two batches in a held-out session-round are kept together.",
-  "interpretation": "Exploratory batch-level diagnostic only. Ten paired rounds are too few for a reliable performance claim. Session-transfer failure and low sensitivity mean no occupancy detector is justified by these development data.",
+  "interpretation": "Exploratory batch-level diagnostic only. Paired-round count and cross-session transfer results must be considered; no occupancy detector is justified unless performance is stable across independent development sessions.",
   "detector_frozen": false,
   "held_out_session_3_touched": false
 }

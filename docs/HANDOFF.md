@@ -119,3 +119,20 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 - A fresh CMake rebuild/CTest invocation could not run in the remote workspace: the `cmake` command is absent from PATH, and the repository-bundled CMake binary cannot load `libjsoncpp.so.25`. The existing C++ test binary was run separately and passed; this is not a fresh build verification.
 - `git diff --check`: passed.
 - Privacy scan of the new analysis report: passed (no BSSID, `/home/user/`, raw capture paths, or UTC timestamp fields).
+
+
+## Additional hardening completed (2026-11-22)
+
+- The live script was changed from an unvalidated PRESENT/ABSENT anomaly heuristic to a diagnostic-only monitor. It always reports `UNKNOWN_UNVALIDATED` for occupancy and reports `ANOMALY` / `NO_ANOMALY` separately. There is no longer an occupancy state smoother in the live path.
+- Live CSI admission now requires the exact 52 active-tone set, `csi_structurally_valid=true`, `target_source_match=true`, and `rx_idle_satisfied=true`, in addition to the L-LTF correlation checks. Missing audit fields fail closed.
+- Existing baseline overwrite is refused by default. `--replace-baseline` is an explicit override; do not use it without approval and a verified backup. The existing baseline was not changed.
+- Development analysis now accepts repeated `--session` arguments, supports future Sessions 4 and 5, and rejects reserved Session 3 using its exact source SHA-256 even if renamed. It requires at least two sessions inside the repository.
+- README and physical runbook now describe Sessions 1/2 as development, Session 3 as reserved, and Sessions 4/5 as next development collection. Historical smoke-test docs are labelled as superseded.
+
+
+## Final report and latest verification
+
+- Added `docs/FINAL_PROJECT_REPORT.md` covering the research question, hardware/method, three sessions, development metrics, limitations, safety hardening, reproducibility, and the negative detector conclusion.
+- Current offline test suite: 33 Python tests passed; L-LTF self-test, CSI-series self-test, Python compilation, shell syntax, and existing C++ test executable passed.
+- Empty-room baseline SHA-256 remains `2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74`.
+- No physical capture was run during this software-only pass. Sessions 4 and 5, private raw-data backup, and live hardware transition checks remain user-console dependencies.

@@ -9,7 +9,8 @@ import live_presence_detector as d
 class LivePresenceDetectorTests(unittest.TestCase):
     def test_normalization_removes_common_gain(self):
         base=np.linspace(-2,2,52)
-        a=[{'tone':i if i<26 else i+1,'mag_db':float(v)} for i,v in enumerate(base)]
+        tones=list(range(-26,0))+list(range(1,27))
+        a=[{'tone':tone,'mag_db':float(v)} for tone,v in zip(tones,base)]
         b=[dict(x,mag_db=x['mag_db']+17.0) for x in a]
         np.testing.assert_allclose(d.normalized_profile(a),d.normalized_profile(b),atol=1e-10)
 
@@ -44,34 +45,49 @@ class LivePresenceDetectorTests(unittest.TestCase):
         self.assertEqual(args.batch_captures,50)
         self.assertEqual(args.min_valid_csi,5)
 
-    def test_raw_trigger_is_not_misreported_as_absent_before_smoothing_confirms(self):
-        self.assertEqual(d.presence_state_label(True, False), 'PENDING')
-        self.assertEqual(d.presence_state_label(False, False), 'ABSENT')
-        self.assertEqual(d.presence_state_label(False, True), 'PRESENT')
+    def test_channel_anomaly_never_becomes_occupancy_decision(self):
+        self.assertEqual(d.occupancy_decision_label(True, False), 'UNKNOWN_UNVALIDATED')
+        self.assertEqual(d.occupancy_decision_label(False, False), 'UNKNOWN_UNVALIDATED')
+        self.assertEqual(d.occupancy_decision_label(False, True), 'UNKNOWN_UNVALIDATED')
 
-    def test_state_hysteresis_and_hold(self):
-        s=d.PresenceState(hold_seconds=10)
-        self.assertFalse(s.update(True,now=0)[0])
-        self.assertTrue(s.update(True,now=1)[0])
-        self.assertTrue(s.update(False,now=5)[0])
-        self.assertFalse(s.update(False,now=16)[0])
+    def test_baseline_overwrite_requires_explicit_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/'baseline.json'; p.write_text('{}')
+            with self.assertRaises(RuntimeError): d.ensure_baseline_write_allowed(p, False)
+            d.ensure_baseline_write_allowed(p, True)
+
+    def test_profile_requires_exact_active_tone_set(self):
+        tones=list(range(-26,0))+list(range(1,27))
+        rows=[{'tone':tone,'mag_db':float(i)} for i,tone in enumerate(tones)]
+        self.assertIsNotNone(d.normalized_profile(rows))
+        rows[-1]['tone']=25
+        self.assertIsNone(d.normalized_profile(rows))
+
 
     def test_rejects_missing_or_weak_csi_and_wrong_source(self):
         with tempfile.TemporaryDirectory() as td:
             p=Path(td)
             (p/'run_manifest.json').write_text(json.dumps({'connected_bssid':'aa:bb:cc:dd:ee:ff','channel':149}))
             with (p/'presence_audit.csv').open('w',newline='') as f:
-                w=csv.DictWriter(f,fieldnames=['capture_index','target_source_match']); w.writeheader()
-                w.writerows([{'capture_index':1,'target_source_match':'True'}, {'capture_index':2,'target_source_match':'True'}, {'capture_index':3,'target_source_match':'False'}])
+                w=csv.DictWriter(f,fieldnames=['capture_index','target_source_match','csi_structurally_valid','rx_idle_satisfied']); w.writeheader()
+                w.writerows([
+                    {'capture_index':1,'target_source_match':'True','csi_structurally_valid':'True','rx_idle_satisfied':'True'},
+                    {'capture_index':2,'target_source_match':'True','csi_structurally_valid':'True','rx_idle_satisfied':'True'},
+                    {'capture_index':3,'target_source_match':'False','csi_structurally_valid':'True','rx_idle_satisfied':'True'},
+                    {'capture_index':4,'target_source_match':'True','csi_structurally_valid':'True','rx_idle_satisfied':'False'},
+                    {'capture_index':5,'target_source_match':'True','csi_structurally_valid':'False','rx_idle_satisfied':'True'}
+                ])
             rows=[]
             tones=list(range(-26,0))+list(range(1,27))
-            for idx,repeat in [(1,.99),(2,.70),(3,.99)]:
+            for idx,repeat in [(1,.99),(2,.70),(3,.99),(4,.99),(5,.99)]:
                 for tone in tones:
                     rows.append({'capture_index':idx,'tone':tone,'mag_db':-40+tone*.01,'phase_rad':.1,
                         'lltf_repeat_corr':repeat,'lltf_stf16_corr':.06,'lltf_symbol_relerr':.02})
             (p/'csi_series.jsonl').write_text(''.join(json.dumps(x)+'\n' for x in rows))
             profiles,bssid,channel=d.load_valid_profiles(p)
             self.assertEqual(len(profiles),1)
+            # Weak L-LTF, wrong AP source, RX-not-idle, and structurally invalid
+            # records must all be excluded independently.
             self.assertEqual(bssid,'aa:bb:cc:dd:ee:ff')
             self.assertEqual(channel,149)
 

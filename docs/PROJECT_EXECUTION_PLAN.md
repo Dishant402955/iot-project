@@ -29,7 +29,7 @@ Build and evaluate an academic stationary-room occupancy prototype using RTL8821
 - RX-idle barrier and post-arm AP-source audit heuristic.
 - Five-round interleaved collector, raw archive preservation, offline reprocessor, round-level analysis, and drift diagnostics.
 - Three physical interleaved sessions collected and anonymized public copies published under data/public_dataset/.
-- Development-only grouped analysis implemented in tools/analyze_presence_development.py; it is pinned to Sessions 1 and 2 and does not open Session 3.
+- Development-only grouped analysis implemented in tools/analyze_presence_development.py; it defaults to Sessions 1 and 2, accepts Sessions 4 and 5 via repeated --session flags, and rejects Session 3 by source SHA-256.
 
 ## Development analysis result
 
@@ -66,7 +66,7 @@ Extend the development analysis to Sessions 1, 2, 4 and 5. Compare within-condit
 
 A valid detector needs a reproducible feature pipeline, trained model or statistical rule, confidence/abstention behavior, temporal state logic, and explicit quality/link-health checks. Insufficient CSI must never become ABSENT. Freeze source, preprocessing, features, thresholds, model artifact, and configuration before evaluating Session 3.
 
-The existing tools/live_presence_detector.py remains an experimental baseline-relative channel-anomaly indicator. Its anomaly trigger is not evidence of human presence and it must not be represented as a validated occupancy classifier.
+The live tool tools/live_presence_detector.py is a channel-anomaly monitor only. It always reports UNKNOWN_UNVALIDATED for occupancy, separately prints channel-anomaly diagnostics, enforces exact tones/structural CSI/target-source/RX-idle gates, and refuses to overwrite an existing baseline without the explicit --replace-baseline flag. The development analysis accepts multiple development sessions via repeated --session flags and rejects held-out Session 3 by SHA-256.
 
 ### 5. One-time held-out evaluation
 
@@ -86,6 +86,10 @@ Only after offline evidence justifies the detector, integrate it into continuous
 - Do not inspect or tune against Session 3 before the detector is frozen.
 - No VFIO binding, driver reload, or physical capture through SSH/remote coding agent.
 - No destructive Git operations or cleanup of user data.
+
+## Final project report
+
+`docs/FINAL_PROJECT_REPORT.md` records the completed software/research work and the negative detector result. The project is not an operational occupancy detector. Remaining work is physical data collection, private raw-data backup, and any future held-out evaluation justified by new development evidence.
 
 ## Authoritative documents
 

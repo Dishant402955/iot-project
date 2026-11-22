@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Development-only, grouped analysis of two interleaved CSI sessions.
+"""Development-only grouped analysis of interleaved CSI sessions.
 
-This tool intentionally accepts only the two designated development sessions.
-It does not open, score, or tune against the reserved held-out Session 3.
-Requires NumPy from vendor/.venv.
+Defaults to development Sessions 1 and 2. Additional development sessions
+may be supplied explicitly. The reserved held-out Session 3 is rejected by
+its SHA-256 even if renamed. Requires NumPy from vendor/.venv.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ DEFAULT_SESSIONS = (
     ROOT / 'data/presence_dataset/interleaved_20261122_180724.jsonl',
     ROOT / 'data/presence_dataset/interleaved_20261122_183204.jsonl',
 )
+HELD_OUT_SESSION_3_SHA256 = '9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57'
 EXPECTED_ORDER = (
     ('ABSENT', 'PRESENT'),
     ('PRESENT', 'ABSENT'),
@@ -25,6 +27,23 @@ EXPECTED_ORDER = (
     ('PRESENT', 'ABSENT'),
     ('ABSENT', 'PRESENT'),
 )
+
+
+def validate_development_sessions(sessions: tuple[Path, ...]) -> None:
+    if len(sessions) < 2:
+        raise ValueError('At least two development sessions are required.')
+    if len(set(sessions)) != len(sessions):
+        raise ValueError('Duplicate development session paths are not allowed.')
+    for path in sessions:
+        try:
+            path.relative_to(ROOT)
+        except ValueError as exc:
+            raise ValueError(f'Development sessions must be inside the repository: {path}') from exc
+        if not path.is_file():
+            raise ValueError(f'Development session does not exist: {path}')
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest == HELD_OUT_SESSION_3_SHA256 or '185040' in path.name or 'session_3' in path.name.lower():
+            raise ValueError(f'Refusing reserved held-out Session 3: {path}')
 
 
 def load_session(path: Path, session_number: int) -> list[dict]:
@@ -136,8 +155,11 @@ def nearest_centroid_scores(train: list[dict], test: list[dict]) -> tuple[np.nda
     return y_test, (scores >= 0).astype(int)
 
 
-def run_analysis(sessions: tuple[Path, Path]) -> dict:
-    rows = load_session(sessions[0], 1) + load_session(sessions[1], 2)
+def run_analysis(sessions: tuple[Path, ...]) -> dict:
+    validate_development_sessions(sessions)
+    rows = []
+    for session_number, path in enumerate(sessions, 1):
+        rows.extend(load_session(path, session_number))
     y_true, y_pred = [], []
     fold_results = []
     groups = sorted({(r['session'], r['round']) for r in rows})
@@ -155,14 +177,16 @@ def run_analysis(sessions: tuple[Path, Path]) -> dict:
     grouped = classification_metrics(np.asarray(y_true), np.asarray(y_pred))
 
     transfer = {}
-    for train_session, test_session in ((1, 2), (2, 1)):
-        train = [r for r in rows if r['session'] == train_session]
+    session_numbers = sorted({r['session'] for r in rows})
+    for test_session in session_numbers:
+        train = [r for r in rows if r['session'] != test_session]
         test = [r for r in rows if r['session'] == test_session]
         y, pred = nearest_centroid_scores(train, test)
-        transfer[f'train_session_{train_session}_test_session_{test_session}'] = classification_metrics(y, pred)
+        train_sessions = [n for n in session_numbers if n != test_session]
+        transfer[f'train_sessions_{train_sessions}_test_session_{test_session}'] = classification_metrics(y, pred)
 
     paired_rounds = []
-    for session_number in (1, 2):
+    for session_number in sorted({r['session'] for r in rows}):
         for round_number in range(1, 6):
             absent = next(r for r in rows if r['session'] == session_number and r['round'] == round_number and r['label'] == 0)
             present = next(r for r in rows if r['session'] == session_number and r['round'] == round_number and r['label'] == 1)
@@ -185,14 +209,14 @@ def run_analysis(sessions: tuple[Path, Path]) -> dict:
         'batches_passing_acquisition_gates': len(rows),
     }
     return {
-        'analysis_scope': 'development sessions 1 and 2 only; held-out session 3 not opened or analyzed',
+        'analysis_scope': f'{len(sessions)} explicitly supplied development sessions; held-out Session 3 rejected by source hash and filename',
         'sessions': [str(p.relative_to(ROOT)) for p in sessions],
         'counts': counts,
         'grouped_leave_one_session_round_out_batch_metrics': grouped,
         'session_transfer_metrics': transfer,
         'paired_rounds': paired_rounds,
         'method': 'For each batch, take the per-tone median across valid CSI profiles. Standardize using training batches only, fit two class centroids, and classify the held-out paired round by nearest centroid. The two batches in a held-out session-round are kept together.',
-        'interpretation': 'Exploratory batch-level diagnostic only. Ten paired rounds are too few for a reliable performance claim. Session-transfer failure and low sensitivity mean no occupancy detector is justified by these development data.',
+        'interpretation': 'Exploratory batch-level diagnostic only. Paired-round count and cross-session transfer results must be considered; no occupancy detector is justified unless performance is stable across independent development sessions.',
         'detector_frozen': False,
         'held_out_session_3_touched': False,
     }
@@ -200,13 +224,14 @@ def run_analysis(sessions: tuple[Path, Path]) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--session-1', type=Path, default=DEFAULT_SESSIONS[0])
-    parser.add_argument('--session-2', type=Path, default=DEFAULT_SESSIONS[1])
+    parser.add_argument('--session', type=Path, action='append', help='development session JSONL; repeat for each session. Defaults to Sessions 1 and 2. Reserved Session 3 is rejected.')
     parser.add_argument('--output', type=Path, default=ROOT / 'docs' / 'PRESENCE_DEVELOPMENT_ANALYSIS_20261122.json')
     args = parser.parse_args()
-    sessions = (args.session_1.resolve(), args.session_2.resolve())
-    if sessions != tuple(p.resolve() for p in DEFAULT_SESSIONS):
-        parser.error('This analysis is deliberately pinned to development Sessions 1 and 2; do not pass Session 3.')
+    sessions = tuple(p.resolve() for p in (args.session or DEFAULT_SESSIONS))
+    try:
+        validate_development_sessions(sessions)
+    except ValueError as exc:
+        parser.error(str(exc))
     report = run_analysis(sessions)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + '\n')

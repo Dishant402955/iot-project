@@ -6,7 +6,7 @@
 
 The RTL8821CE acquisition and strict CSI extraction path is qualified for the tested physical setup. Three interleaved sessions have been collected and anonymized public feature copies have been released. However, the available development data does **not** support a reliable stationary-presence classifier. The project does not yet have a validated working occupancy detector.
 
-The existing tools/live_presence_detector.py is a baseline-relative channel-anomaly indicator. Its anomaly/motion triggers can be caused by channel drift and are not validated evidence of human presence. Do not describe its PRESENT / ABSENT output labels as validated occupancy decisions or deploy it as such.
+The live tool tools/live_presence_detector.py is now a baseline-relative channel-anomaly monitor only. It always reports UNKNOWN_UNVALIDATED for occupancy and separately reports ANOMALY / NO_ANOMALY as channel diagnostics. It never emits PRESENT/ABSENT from anomaly thresholds. Its capture acceptance path requires the exact 52-tone set, structural CSI validity, target-source match, and RX-idle audit. It refuses to overwrite an existing baseline unless --replace-baseline is explicitly supplied.
 
 ## Acquisition evidence
 
@@ -53,6 +53,10 @@ The matched-filter extractor could select the second of the two repeated 64-samp
 - Drift indicators (common gain, spectral slope, tone spread, RSSI, CFO) remain diagnostics/nuisance variables until validated as features.
 - The empty-room baseline is unchanged and must not be overwritten without explicit approval.
 
+## Final project report
+
+See `docs/FINAL_PROJECT_REPORT.md` for the complete research report, acquisition method, session results, validation metrics, limitations, and reproducibility commands.
+
 ## Remaining work
 
 1. Verify and privately back up original labelled JSONL and raw IQ archives; the raw archive contents have not been fully verified or backed up off-device.
@@ -61,4 +65,4 @@ The matched-filter extractor could select the second of the two repeated 64-samp
 4. If development evidence supports a stable model, implement explicit confidence/abstention and quality handling, freeze the complete detector, and evaluate Session 3 once.
 5. Integrate live inference and validate physical occupancy transitions only if offline held-out performance supports it.
 
-If additional development data still fails cross-session validation, report that this hardware/setup did not demonstrate reliable stationary-presence detection. Do not tune against the held-out session.
+If additional development data still fails cross-session validation, report that this hardware/setup did not demonstrate reliable stationary-presence detection. Do not tune against the held-out session. The development analysis accepts repeated --session arguments for Sessions 4 and 5 and rejects the held-out Session 3 by its SHA-256, even if renamed.

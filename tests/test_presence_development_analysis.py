@@ -38,6 +38,10 @@ class PresenceDevelopmentAnalysisTests(unittest.TestCase):
         self.assertIn('interleaved_20261122_180724.jsonl', str(analysis.DEFAULT_SESSIONS[0]))
         self.assertIn('interleaved_20261122_183204.jsonl', str(analysis.DEFAULT_SESSIONS[1]))
         self.assertNotIn('185040', ' '.join(map(str, analysis.DEFAULT_SESSIONS)))
+        self.assertEqual(len(analysis.HELD_OUT_SESSION_3_SHA256), 64)
+
+    def test_held_out_session_three_is_rejected_by_hash_even_if_renamed(self):
+        self.assertIn('9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57', analysis.HELD_OUT_SESSION_3_SHA256)
 
 
 if __name__ == '__main__':

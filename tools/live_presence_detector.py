@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Room-calibrated, low-rate CSI channel-anomaly presence indicator.
+"""Room-calibrated CSI channel-anomaly monitor (occupancy remains UNKNOWN).
 
-This is an experimental binary occupancy indicator, not RF-DS reproduction or
-an accuracy-validated detector. Run with sudo because the capture script
-briefly binds the Wi-Fi adapter to VFIO and restores its normal driver.
+Development data has not established session-independent occupancy detection.
+This tool reports CSI channel anomalies only and never claims PRESENT/ABSENT.
+Run with sudo because capture briefly binds the Wi-Fi adapter to VFIO.
 """
 from __future__ import annotations
 import argparse, csv, json, math, os, re, signal, statistics, subprocess, sys, tempfile, time
-from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,8 +25,9 @@ QUALITY = {'repeat': 0.85, 'stf16': 0.50, 'symbol_err': 0.25}
 def normalized_profile(rows):
     rows = sorted(rows, key=lambda r: int(r['tone']))
     tones = [int(r['tone']) for r in rows]
+    expected_tones = list(range(-26, 0)) + list(range(1, 27))
     values = np.asarray([float(r['mag_db']) for r in rows], dtype=float)
-    if len(rows) != 52 or len(set(tones)) != 52 or not np.all(np.isfinite(values)):
+    if len(rows) != 52 or tones != expected_tones or not np.all(np.isfinite(values)):
         return None
     return values - np.median(values)
 
@@ -60,7 +60,11 @@ def load_valid_profiles(run_dir: Path):
             if float(first['lltf_symbol_relerr']) > QUALITY['symbol_err']: continue
         except (KeyError, TypeError, ValueError): continue
         a = audit.get(index, {})
+        # All three independent audit gates are mandatory. Missing audit fields
+        # fail closed rather than silently admitting a profile.
+        if a.get('csi_structurally_valid', '').lower() != 'true': continue
         if a.get('target_source_match', '').lower() != 'true': continue
+        if a.get('rx_idle_satisfied', '').lower() != 'true': continue
         profile = normalized_profile(rows)
         if profile is not None: profiles.append(profile)
     bssid = str(manifest.get('connected_bssid', '')).lower()
@@ -212,19 +216,6 @@ def build_baseline(profiles, bssid, channel):
         'interpretation': 'Empty-room CSI channel-anomaly baseline; shape diagnostics are nuisance monitors, not presence features.'}
 
 
-class PresenceState:
-    def __init__(self, hold_seconds=15):
-        self.hold_seconds = float(hold_seconds)
-        self.recent = deque(maxlen=3)
-        self.present_until = 0.0
-
-    def update(self, positive, now=None):
-        now = time.monotonic() if now is None else float(now)
-        self.recent.append(bool(positive))
-        if sum(self.recent) >= 2:
-            self.present_until = max(self.present_until, now + self.hold_seconds)
-        return now < self.present_until, max(0.0, self.present_until - now)
-
 
 def score_profiles(profiles, baseline):
     if not profiles: return None
@@ -235,11 +226,17 @@ def score_profiles(profiles, baseline):
     return float(np.median(anomaly)), float(np.percentile(motion, 90)), float(np.max(anomaly))
 
 
-def presence_state_label(raw_positive, smoothed_present):
-    """Keep a one-batch raw trigger distinct from confirmed smoothed presence."""
-    if smoothed_present:
-        return 'PRESENT'
-    return 'PENDING' if raw_positive else 'ABSENT'
+def occupancy_decision_label(*_args, **_kwargs):
+    """No validated classifier exists; channel anomalies cannot decide occupancy."""
+    return 'UNKNOWN_UNVALIDATED'
+
+
+def ensure_baseline_write_allowed(path: Path, replace: bool) -> None:
+    if path.exists() and not replace:
+        raise RuntimeError(
+            f'Baseline already exists: {path}. Refusing to overwrite it. '
+            'Use --replace-baseline only after explicit approval and a verified backup.'
+        )
 
 
 def main():
@@ -247,11 +244,11 @@ def main():
     ap.add_argument('--calibration-seconds', type=float, default=30)
     ap.add_argument('--batch-captures', type=int, default=50, help='captures per batch; larger batches improve the chance of collecting enough valid CSI')
     ap.add_argument('--min-valid-csi', type=int, default=5, help='minimum strict-quality CSI profiles required before scoring a batch')
-    ap.add_argument('--hold-seconds', type=float, default=15)
     ap.add_argument('--baseline', type=Path, default=DEFAULT_BASELINE)
     ap.add_argument('--skip-calibration', action='store_true')
-    ap.add_argument('--once', action='store_true', help='score one capture batch using an existing baseline; reports raw trigger separately because smoothing needs multiple batches')
+    ap.add_argument('--once', action='store_true', help='score one capture batch using an existing baseline; occupancy remains UNKNOWN_UNVALIDATED')
     ap.add_argument('--yes', action='store_true', help='do not wait for Enter before empty-room calibration')
+    ap.add_argument('--replace-baseline', action='store_true', help='explicitly replace an existing baseline after confirming the room is empty')
     args = ap.parse_args()
     if os.geteuid() != 0:
         raise SystemExit('Run at the laptop console with sudo: sudo vendor/.venv/bin/python tools/live_presence_detector.py')
@@ -259,6 +256,10 @@ def main():
     if not 3 <= args.min_valid_csi <= args.batch_captures: ap.error('--min-valid-csi must be 3..batch-captures')
     if args.calibration_seconds < 10: ap.error('--calibration-seconds must be at least 10')
     if not args.skip_calibration:
+        try:
+            ensure_baseline_write_allowed(args.baseline, args.replace_baseline)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc))
         print('\nEMPTY-ROOM CALIBRATION: leave the monitored room/area empty. Keep the laptop and AP fixed.', flush=True)
         print('The Wi-Fi adapter is temporarily used for CSI capture; the detector waits for NetworkManager to reconnect after every batch.', flush=True)
         if not args.yes: input('Clear the area, then press Enter to calibrate... ')
@@ -285,8 +286,10 @@ def main():
         if not args.baseline.is_file(): raise SystemExit(f'Baseline not found: {args.baseline}; run without --skip-calibration first.')
         baseline=json.loads(args.baseline.read_text())
     if not args.baseline.is_file(): raise RuntimeError('Baseline file was not created.')
-    state=PresenceState(args.hold_seconds)
-    print(f"MONITORING: AP={baseline.get('connected_bssid')} channel={baseline.get('channel')}; Ctrl+C to stop.", flush=True)
+    center = np.asarray(baseline.get('profile_db_centered', []), dtype=float)
+    if center.shape != (52,) or not np.isfinite(center).all():
+        raise SystemExit('Baseline must contain exactly 52 finite tone values; refusing to score.')
+    print(f"MONITORING DIAGNOSTICS ONLY: AP={baseline.get('connected_bssid')} channel={baseline.get('channel')}; occupancy decision is always UNKNOWN_UNVALIDATED. Ctrl+C to stop.", flush=True)
     while True:
         profiles,bssid,channel,run_dir=capture_batch(args.batch_captures)
         if bssid != baseline.get('connected_bssid') or channel != baseline.get('channel'):
@@ -309,17 +312,15 @@ def main():
         if baseline_slope is None:
             tones=np.asarray(list(range(-26,0))+list(range(1,27)),dtype=float)
             baseline_slope=float(np.polyfit(tones,np.asarray(baseline['profile_db_centered'],dtype=float),1)[0])
-        positive=(anomaly >= float(baseline['anomaly_threshold_db']) or motion >= float(baseline['motion_threshold_db']))
-        present,remaining=state.update(positive)
-        label=presence_state_label(positive, present)
-        raw_label='TRIGGER' if positive else 'CLEAR'
-        print(f'{datetime.now().astimezone().isoformat(timespec="seconds")} {label} '
-              f'raw_signal={raw_label} smoothed={"PRESENT" if present else "NOT_PRESENT"} '
+        anomaly_flag=(anomaly >= float(baseline['anomaly_threshold_db']) or motion >= float(baseline['motion_threshold_db']))
+        raw_label='ANOMALY' if anomaly_flag else 'NO_ANOMALY'
+        print(f'{datetime.now().astimezone().isoformat(timespec="seconds")} UNKNOWN_UNVALIDATED '
+              f'occupancy_decision={occupancy_decision_label()} channel_anomaly={raw_label} '
               f'anomaly={anomaly:.2f}/{baseline["anomaly_threshold_db"]:.2f}dB '
               f'peak={peak:.2f}dB motion_p90={motion:.2f}/{baseline["motion_threshold_db"]:.2f}dB '
               f'spectral_slope={shape["spectral_slope_median_db_per_tone"]:.4f}/{baseline_slope:.4f}dB_per_tone '
               f'tone_spread={shape["tone_spread_median_db"]:.3f}dB '
-              f'valid_CSI={len(profiles)}/{args.batch_captures} hold={remaining:.1f}s latest={run_dir}', flush=True)
+              f'valid_CSI={len(profiles)}/{args.batch_captures} latest={run_dir}', flush=True)
         if args.once: return 0
 
 if __name__ == '__main__':
