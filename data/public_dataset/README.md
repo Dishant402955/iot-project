@@ -41,3 +41,22 @@ One PRESENT batch (round 3) yielded 49/50 strict CSI profiles; it still passed t
 The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives are not included.
 
 This remains controlled-environment development/validation data, not held-out evaluation or evidence of generalization across rooms, devices, people, or environments.
+
+## Session 3: anonymized held-out interleaved capture
+
+`interleaved_session_3_anonymized.jsonl` contains the third completed five-round interleaved physical capture session. It is designated as the untouched held-out evaluation session.
+
+- 5 paired rounds, 10 batches total
+- 5 ABSENT batches and 5 PRESENT batches, alternating order by round
+- 500 capture attempts; 497 valid strict CSI profiles (99.4%)
+- 497/500 target-attributed strict CSI profiles (99.4%)
+- RX-idle barrier: 500/500 (100%)
+- All 10 batches passed both configured acquisition gates
+- 52 active subcarriers per retained strict CSI profile
+- Wi-Fi channel 149, 20 MHz
+
+Three batches yielded 49/50 valid strict CSI profiles: PRESENT rounds 3 and 4, and ABSENT round 5. These shortfalls are retained as measured. No samples were fabricated or imputed.
+
+The public copy retains occupancy labels, CSI feature profiles, acquisition-quality metrics, channel configuration, and the experimental protocol. It omits the access-point BSSID, exact wall-clock timestamps, and machine-local filesystem paths. Batch timing is represented as elapsed seconds from the start of the session. Raw IQ archives are not included.
+
+**Evaluation hygiene:** this session must not be used for feature selection, threshold tuning, model selection, or other development decisions. Freeze the detector using Sessions 1 and 2 first, then evaluate once on Session 3. This is one controlled room/device setup and does not establish generalization to other environments.
