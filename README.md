@@ -6,7 +6,7 @@ Academic research prototype investigating whether a Realtek RTL8821CE 1T1R adapt
 
 **The acquisition pipeline is qualified for the tested setup, but the collected development data does not establish reliable stationary-presence detection.** Do not report a working detector or accuracy claim.
 
-Five interleaved sessions have been collected. Sessions 1, 2, 4 and 5 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
+Five interleaved sessions have been collected. Sessions 1, 2, 4 and 5 are development data. Session 3 was kept out of model selection and evaluated exactly once after freezing the benchmark model. The four development sessions contain: 2,000 attempts, 1,989 retained strict CSI profiles and 40/40 batches passing acquisition gates. Grouped nearest-centroid balanced accuracy is 0.80 (sensitivity 0.65). Eight lightweight models were compared: a small MLP reached 0.850 grouped balanced accuracy, and 0.800 pooled leave-one-session-out balanced accuracy (sensitivity 0.60); Random Forest reached 0.80 / 0.65. Per-session performance varies substantially. No model is selected for deployment.
 
 The frozen nearest-centroid benchmark was evaluated once on Session 3: accuracy 0.70, sensitivity 0.60, specificity 0.80, and balanced accuracy 0.70 (TP=3, TN=4, FP=1, FN=2). It missed two of five occupied batches. This is not sufficient for reliable occupancy detection or deployment. The live tool `tools/live_presence_detector.py` remains a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
 
@@ -19,14 +19,15 @@ cd iot-project
 ./tools/build_devourer_pcie.sh
 ```
 
-The isolated Devourer setup downloads build dependencies under `vendor/.local-deps` and creates `vendor/.venv`. Hardware capture is a separate deliberate physical-console action.
+The isolated Devourer setup downloads build dependencies under `vendor/.local-deps` and creates `vendor/.venv`. For model comparison, install the pinned analysis dependency with `uv pip install --python vendor/.venv/bin/python -r tools/requirements-presence-analysis.txt`. Hardware capture is a separate deliberate physical-console action.
 
 ## Evidence and reports
 
 - [Final project report](docs/FINAL_PROJECT_REPORT.md): research question, acquisition method, results, limitations, and final conclusion.
 - [Frozen benchmark model](docs/BASELINE_MODEL_FREEZE.md): fixed Session 1/2 centroid model and held-out evaluation protocol.
 - [One-time held-out result](docs/HELD_OUT_EVALUATION_SESSION3_20261122.md): Session 3 metrics and per-batch predictions.
-- [Development analysis](docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md): Sessions 1 and 2 only, with grouped and cross-session evaluation.
+- [Combined development analysis](docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md): Sessions 1, 2, 4 and 5 with grouped and leave-one-session-out evaluation.
+- [Model comparison](docs/PRESENCE_MODEL_COMPARISON_20261122.md): nearest centroid, logistic regression, SVMs, tree ensembles and small MLP.
 - [Live detector status](docs/LIVE_DETECTOR_STATUS.md): acquisition evidence, detector semantics, and next milestones.
 - [Project execution plan](docs/PROJECT_EXECUTION_PLAN.md): authoritative milestones and integrity constraints.
 - [Physical capture runbook](docs/presence-sensing-runbook.md): hardware collection procedure.
@@ -52,23 +53,20 @@ Strict CSI gates: exactly 52 finite active tones; repeated L-LTF correlation >= 
 
 Session 5 is now collected and anonymized. It contains 500 attempts, 498 strict structural CSI profiles, 492 target-attributed strict CSI profiles retained (246 ABSENT and 246 PRESENT), 500/500 RX-idle checks, and 10/10 batches passing both acquisition gates. Its aggregate descriptive median-profile distance is 0.2137 dB RMS. See `docs/SESSION5_ACQUISITION_ANALYSIS_20261122.md`. This distance is not a detector-accuracy metric.
 
-The next offline analysis should use Sessions 1, 2, 4 and 5 only:
+The completed combined analysis uses Sessions 1, 2, 4 and 5 only:
 
 ```bash
-vendor/.venv/bin/python tools/analyze_presence_development.py \
-  --session data/presence_dataset/interleaved_20261122_180724.jsonl \
-  --session data/presence_dataset/interleaved_20261122_183204.jsonl \
-  --session data/presence_dataset/interleaved_20261122_200618.jsonl \
-  --session data/presence_dataset/interleaved_20261122_202430.jsonl
+vendor/.venv/bin/python tools/analyze_presence_development.py
 ```
 
-The development analysis tool rejects Session 3 by its SHA-256 even if the file is renamed. Session 3 has already been used for the single frozen-model evaluation and must never be used for further tuning. Any revised model requires new development sessions and a new untouched held-out session.
+Both analysis tools enforce an exact allowlist of the four development source paths before opening files. The consumed Session 3 is not read or used. It must never be used for further tuning. Any revised model requires additional independent development sessions and a new untouched held-out session.
 
 ## Reproducible checks
 
 ```bash
 vendor/.venv/bin/python -m unittest discover -s tests -v
 vendor/.venv/bin/python tools/analyze_presence_development.py
+vendor/.venv/bin/python tools/compare_presence_models.py
 vendor/.venv/bin/python vendor/devourer/tools/la_csi.py --selftest
 vendor/.venv/bin/python vendor/devourer/tests/la_csi_series_selftest.py
 python3 -m compileall -q tools vendor/devourer/tools tests

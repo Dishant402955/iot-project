@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Development-only grouped analysis of interleaved CSI sessions.
 
-Defaults to development Sessions 1 and 2. Additional development sessions
-may be supplied explicitly. The reserved held-out Session 3 is rejected by
-its SHA-256 even if renamed. Requires NumPy from vendor/.venv.
+Defaults to all four allowlisted development sessions (1, 2, 4, 5). Exact
+source paths and SHA-256 values are pinned. The consumed held-out Session 3
+is rejected by path before any file access. Requires NumPy from vendor/.venv.
 """
 from __future__ import annotations
 
@@ -15,11 +15,20 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SESSIONS = (
-    ROOT / 'data/presence_dataset/interleaved_20261122_180724.jsonl',
-    ROOT / 'data/presence_dataset/interleaved_20261122_183204.jsonl',
-)
 HELD_OUT_SESSION_3_SHA256 = '9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57'
+ALLOWED_SESSION_FILES = {
+    'data/presence_dataset/interleaved_20261122_180724.jsonl': 1,
+    'data/presence_dataset/interleaved_20261122_183204.jsonl': 2,
+    'data/presence_dataset/interleaved_20261122_200618.jsonl': 4,
+    'data/presence_dataset/interleaved_20261122_202430.jsonl': 5,
+}
+DEFAULT_SESSIONS = tuple(ROOT / relative for relative in ALLOWED_SESSION_FILES)
+ALLOWED_SESSION_SHA256 = {
+    'data/presence_dataset/interleaved_20261122_180724.jsonl': 'c18489c749c1b7e55effbe2c42a3a4c9a88cd39110419264d1c6f43b93c70836',
+    'data/presence_dataset/interleaved_20261122_183204.jsonl': '4faca4b438b6bba0bfb2572fa5c4f4cf59558c780d815762f78fb18f51e5f553',
+    'data/presence_dataset/interleaved_20261122_200618.jsonl': '15fb6d54295d945ab7e64cb5dd64009d33be9afac74f701e8e70713f76d44eca',
+    'data/presence_dataset/interleaved_20261122_202430.jsonl': '43dce1a015e5291de578d1c9128f51bf130a74ef9c0c9fbba81fa3419e5156db',
+}
 EXPECTED_ORDER = (
     ('ABSENT', 'PRESENT'),
     ('PRESENT', 'ABSENT'),
@@ -29,21 +38,40 @@ EXPECTED_ORDER = (
 )
 
 
+def session_id_for_path(path: Path) -> int:
+    """Return the real acquisition session ID for an allowlisted source file."""
+    try:
+        relative = path.relative_to(ROOT).as_posix()
+    except ValueError as exc:
+        raise ValueError(f'Development sessions must be inside the repository: {path}') from exc
+    if relative not in ALLOWED_SESSION_FILES:
+        raise ValueError(f'Refusing non-allowlisted development session: {relative}')
+    return ALLOWED_SESSION_FILES[relative]
+
+
 def validate_development_sessions(sessions: tuple[Path, ...]) -> None:
     if len(sessions) < 2:
         raise ValueError('At least two development sessions are required.')
     if len(set(sessions)) != len(sessions):
         raise ValueError('Duplicate development session paths are not allowed.')
+    seen_ids = set()
     for path in sessions:
         try:
-            path.relative_to(ROOT)
+            relative = path.relative_to(ROOT).as_posix()
         except ValueError as exc:
             raise ValueError(f'Development sessions must be inside the repository: {path}') from exc
+        # Reject non-allowlisted paths before any file access. The consumed held-out file is
+        # deliberately not opened, hashed, parsed, or otherwise inspected.
+        session_id = session_id_for_path(path)
+        if session_id in seen_ids:
+            raise ValueError(f'Duplicate development session ID: {session_id}')
+        seen_ids.add(session_id)
         if not path.is_file():
             raise ValueError(f'Development session does not exist: {path}')
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if digest == HELD_OUT_SESSION_3_SHA256 or '185040' in path.name or 'session_3' in path.name.lower():
-            raise ValueError(f'Refusing reserved held-out Session 3: {path}')
+        expected_digest = ALLOWED_SESSION_SHA256[relative]
+        if digest != expected_digest:
+            raise ValueError(f'Development session source hash mismatch for Session {session_id}')
 
 
 def load_session(path: Path, session_number: int) -> list[dict]:
@@ -158,8 +186,8 @@ def nearest_centroid_scores(train: list[dict], test: list[dict]) -> tuple[np.nda
 def run_analysis(sessions: tuple[Path, ...]) -> dict:
     validate_development_sessions(sessions)
     rows = []
-    for session_number, path in enumerate(sessions, 1):
-        rows.extend(load_session(path, session_number))
+    for path in sessions:
+        rows.extend(load_session(path, session_id_for_path(path)))
     y_true, y_pred = [], []
     fold_results = []
     groups = sorted({(r['session'], r['round']) for r in rows})
@@ -209,8 +237,8 @@ def run_analysis(sessions: tuple[Path, ...]) -> dict:
         'batches_passing_acquisition_gates': len(rows),
     }
     return {
-        'analysis_scope': f'{len(sessions)} explicitly supplied development sessions; held-out Session 3 rejected by source hash and filename',
-        'sessions': [str(p.relative_to(ROOT)) for p in sessions],
+        'analysis_scope': f'{len(sessions)} allowlisted development sessions (Sessions {sorted({r["session"] for r in rows})}); consumed held-out Session 3 was not accessed',
+        'sessions': [{'session_id': session_id_for_path(p), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in sessions],
         'counts': counts,
         'grouped_leave_one_session_round_out_batch_metrics': grouped,
         'session_transfer_metrics': transfer,
@@ -218,13 +246,13 @@ def run_analysis(sessions: tuple[Path, ...]) -> dict:
         'method': 'For each batch, take the per-tone median across valid CSI profiles. Standardize using training batches only, fit two class centroids, and classify the held-out paired round by nearest centroid. The two batches in a held-out session-round are kept together.',
         'interpretation': 'Exploratory batch-level diagnostic only. Paired-round count and cross-session transfer results must be considered; no occupancy detector is justified unless performance is stable across independent development sessions.',
         'detector_frozen': False,
-        'held_out_session_3_touched': False,
+        'consumed_held_out_session_3_accessed': False,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--session', type=Path, action='append', help='development session JSONL; repeat for each session. Defaults to Sessions 1 and 2. Reserved Session 3 is rejected.')
+    parser.add_argument('--session', type=Path, action='append', help='allowlisted development session JSONL; repeat for each session. Defaults to Sessions 1, 2, 4 and 5. Other paths are rejected before file access.')
     parser.add_argument('--output', type=Path, default=ROOT / 'docs' / 'PRESENCE_DEVELOPMENT_ANALYSIS_20261122.json')
     args = parser.parse_args()
     sessions = tuple(p.resolve() for p in (args.session or DEFAULT_SESSIONS))
@@ -236,11 +264,12 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({
+        'sessions': report['sessions'],
         'counts': report['counts'],
         'grouped_leave_one_session_round_out_batch_metrics': report['grouped_leave_one_session_round_out_batch_metrics'],
         'session_transfer_metrics': report['session_transfer_metrics'],
         'output': str(args.output),
-        'held_out_session_3_touched': False,
+        'consumed_held_out_session_3_accessed': False,
     }, indent=2))
     return 0
 

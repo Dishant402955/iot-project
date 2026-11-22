@@ -61,8 +61,9 @@ Each session used five rounds, ten batches, and 50 attempts per batch (500 attem
 | 2 | Development | 500 | 499 | 10/10 batches pass |
 | 3 | Reserved held-out | 500 | 497 | 10/10 batches pass |
 | 4 | Development | 500 | 498 | 10/10 batches pass |
+| 5 | Development | 500 | 492 target-attributed (498 structural) | 10/10 batches pass |
 
-Sessions 1 and 2 are the only data used by development analysis/model selection. Session 3 was evaluated exactly once after the benchmark was frozen; it was not used for training, feature selection, or threshold tuning. Its source SHA-256 is `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`.
+The original frozen benchmark was trained on Sessions 1 and 2 only. Session 3 was evaluated exactly once after that benchmark was frozen; it was not used for training, feature selection, or threshold tuning. Subsequent development/model comparison used Sessions 1, 2, 4 and 5 only; Session 3 was not accessed. Its source SHA-256 is `9c2bfa791fbb67c511330aef9207dad74be32e388056930cd17522310ee1af57`.
 
 Anonymized feature copies of Sessions 1-5 are published under `data/public_dataset/`. A dataset README documents the public schema and privacy treatment. They omit BSSID, exact wall-clock timestamps, and local filesystem paths. Raw IQ and original labelled JSONL are excluded from the public repository and still require private encrypted off-device backup.
 
@@ -70,7 +71,7 @@ Anonymized feature copies of Sessions 1-5 are published under `data/public_datas
 
 Session 4 was collected after the Session 3 held-out evaluation. It is explicitly development data and does not alter or replace the one-time held-out result. The collector completed 500 attempts across ten batches; all ten batches passed both configured acquisition gates and RX-idle was 500/500. There were 498 valid strict CSI profiles: 248 ABSENT and 250 PRESENT. The two shortfalls were one profile each in ABSENT rounds 1 and 5; neither batch failed its configured acquisition gates.
 
-The aggregate ABSENT/PRESENT median feature-profile distance was 0.1707 dB RMS, with per-round distances from 0.0938 to 0.4479 dB RMS. This is a descriptive within-session comparison only, not classification accuracy or evidence of cross-session separability. Session 4 must be included with Sessions 1, 2 and 5 in grouped development analysis, while Session 3 remains excluded from further development. Full acquisition details: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`.
+The aggregate ABSENT/PRESENT median feature-profile distance was 0.1707 dB RMS, with per-round distances from 0.0938 to 0.4479 dB RMS. This is a descriptive within-session comparison only, not classification accuracy or evidence of cross-session separability. Session 4 was included with Sessions 1, 2 and 5 in the combined grouped development analysis, while Session 3 remained excluded. Full acquisition details: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`.
 
 ## 5.2 Additional development acquisition: Session 5
 
@@ -155,7 +156,7 @@ Latest offline verification before the held-out run: 37 Python unit tests passed
 
 ## 11. Limitations and remaining physical work
 
-1. Only two sessions are currently available for development analysis; Session 3 has been evaluated once as the held-out benchmark.
+1. Four development sessions (1, 2, 4, 5) are available; Session 3 was evaluated once as the consumed held-out benchmark and was excluded from all subsequent analysis.
 2. Cross-session sensitivity is zero in both transfer directions for the current diagnostic.
 3. The AP-source audit is heuristic rather than hardware source filtering.
 4. CSI response is sensitive to link state, spectral slope, signal level, multipath, and environmental drift.
@@ -163,10 +164,32 @@ Latest offline verification before the held-out run: 37 Python unit tests passed
 6. Original labelled data and raw IQ archives have not been verified as backed up off-device.
 7. Physical entry/exit testing and driver restoration after repeated live monitor operation still require local console execution.
 
-Two additional independent development sessions (Sessions 4 and 5) are needed, preferably on separate days/time blocks. Analyze Sessions 1, 2, 4, and 5 only. The analysis tool accepts repeated `--session` arguments and rejects Session 3 by its source SHA-256 even if renamed. If cross-session validation remains weak, the appropriate project conclusion is that this hardware/setup did not demonstrate reliable stationary-presence detection. Any revised detector requires a new untouched held-out session.
+Sessions 1, 2, 4 and 5 have now been analyzed together and compared across eight model families. Cross-session validation remains weak and unstable. The appropriate conclusion is that this hardware/setup has not demonstrated reliable stationary-presence detection. Any revised detector requires additional independent development data and a new untouched held-out session.
 
 ## 12. Final conclusion
 
 The project successfully delivered a repeatable CSI acquisition path, strict extraction and quality gates, interleaved labelled datasets, anonymized public feature releases, reproducible development analysis, safety-oriented live-tool behavior, and project documentation.
 
 **It did not deliver a validated stationary-presence classifier.** The available development evidence does not support one. The correct engineering result is an acquisition-qualified research prototype with occupancy output deliberately abstained. The one-time held-out benchmark produced 0.70 balanced accuracy and 0.60 sensitivity, which is insufficient for deployment. Additional independent physical data and a new held-out session would be required for any revised model.
+
+
+## 13. Expanded development analysis and model comparison (2026-11-22)
+
+The four development datasets (Sessions 1, 2, 4 and 5) contain 2,000 capture attempts, 1,989 retained strict CSI profiles and 40 batch-level examples across 20 paired session-round groups. All 40 batches passed both configured acquisition gates. The consumed held-out Session 3 was not accessed by either new analysis tool.
+
+Grouped leave-one-session-round-out nearest-centroid evaluation produced 0.80 balanced accuracy (sensitivity 0.65, specificity 0.95). Eight fixed-configuration candidates were compared with train-fold-only preprocessing: regularized logistic regression, linear SVM, RBF SVM, Random Forest, ExtraTrees, shallow Gradient Boosting and a small MLP, alongside nearest centroid. The small MLP and Random Forest tied for the best grouped result (0.850 balanced accuracy); MLP sensitivity/specificity were 0.80/0.90.
+
+These grouped results do not transfer robustly. In leave-one-development-session-out evaluation, the MLP reached 0.800 pooled balanced accuracy with 0.60 sensitivity; Random Forest reached 0.800 with 0.65 sensitivity. Per-session balanced accuracy varied, including 0.60 for the MLP and Random Forest on Session 1. With only 40 batch examples from four acquisition sessions, model ranking is uncertain and session effects remain material. **No candidate is selected for deployment.** The live detector remains diagnostic-only and always returns `UNKNOWN_UNVALIDATED` for occupancy.
+
+Reproducible analysis tools: `tools/analyze_presence_development.py` and `tools/compare_presence_models.py`. Full metrics and source hashes: `docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md` / `.json` and `docs/PRESENCE_MODEL_COMPARISON_20261122.md` / `.json`. The tools enforce an exact allowlist of Sessions 1, 2, 4 and 5 before opening source files. Session 3 remains consumed and excluded.
+
+
+## 14. Software completion and model comparison
+
+The expanded analysis used only development Sessions 1, 2, 4 and 5. It contains 2,000 attempts, 1,989 strict CSI profiles, 40 batch-level examples and 20 paired session-round groups; all 40 batches passed the acquisition gates. The analysis uses one per-tone median feature vector per batch and keeps both conditions from each paired round in the same fold.
+
+Eight model families were evaluated with train-fold-only scaling: nearest centroid, regularized logistic regression, linear SVM, RBF SVM, constrained Random Forest, ExtraTrees, shallow Gradient Boosting and a small 8-unit MLP. Grouped leave-one-session-round-out balanced accuracy ranged from 0.750 to 0.850. The MLP and Random Forest tied at 0.850. Leave-one-development-session-out pooled balanced accuracy was 0.800 for the MLP (sensitivity 0.60) and 0.800 for Random Forest (sensitivity 0.65). Performance varied by held-out session, including 0.60 balanced accuracy for both MLP and Random Forest on Session 1.
+
+These data provide insufficient evidence of session-independent occupancy information. The MLP's grouped score does not justify selecting it: only 40 batch examples from four sessions are available, and session effects remain material. **No candidate model is selected for deployment.** `tools/live_presence_detector.py` remains a channel-anomaly diagnostic and always emits `UNKNOWN_UNVALIDATED` for occupancy.
+
+The reproducible model comparison is `tools/compare_presence_models.py`; dependency pins are in `tools/requirements-presence-analysis.txt`. Full grouped and per-session results are in `docs/PRESENCE_MODEL_COMPARISON_20261122.md` and `.json`. The development tools enforce exact allowlisted source paths for Sessions 1, 2, 4 and 5 before opening files. The consumed Session 3 was not accessed by the new analyses.

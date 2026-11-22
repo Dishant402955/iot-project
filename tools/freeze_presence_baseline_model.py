@@ -13,7 +13,10 @@ import numpy as np
 import analyze_presence_development as dev
 
 ROOT = Path(__file__).resolve().parents[1]
-SESSION_PATHS = dev.DEFAULT_SESSIONS
+SESSION_PATHS = (
+    ROOT / 'data/presence_dataset/interleaved_20261122_180724.jsonl',
+    ROOT / 'data/presence_dataset/interleaved_20261122_183204.jsonl',
+)
 EXPECTED_HASHES = (
     'c18489c749c1b7e55effbe2c42a3a4c9a88cd39110419264d1c6f43b93c70836',
     '4faca4b438b6bba0bfb2572fa5c4f4cf59558c780d815762f78fb18f51e5f553',

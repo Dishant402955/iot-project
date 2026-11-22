@@ -34,15 +34,15 @@ This is an acquisition-quality pass, not proof of presence detection. AP attribu
 
 All five sessions have 500 attempts, five paired rounds and ten batches. Every retained profile has 52 active tones. Anonymized feature datasets for Sessions 1-5 are published under data/public_dataset/. Session 3 remains reserved as the already-consumed one-time held-out evaluation; Sessions 1, 2, 4 and 5 are development data. Original labelled JSONL and raw IQ remain local-only.
 
-### Development analysis: Sessions 1 and 2 (Sessions 4 and 5 pending grouped analysis)
+### Combined development analysis: Sessions 1, 2, 4 and 5
 
-- 1,000 attempts; 999 valid strict CSI profiles (500 ABSENT, 499 PRESENT).
-- 20/20 batches pass both acquisition gates; RX-idle is 100% in every batch.
-- Grouped leave-one-session-round-pair-out batch-median nearest-centroid diagnostic: accuracy 0.80, sensitivity 0.60, specificity 1.00, balanced accuracy 0.80 (TP=6, TN=10, FP=0, FN=4).
-- Train Session 1/test Session 2: accuracy 0.50, sensitivity 0.00, specificity 1.00, balanced accuracy 0.50.
-- Train Session 2/test Session 1: same result. Both transfer tests predicted all batches ABSENT.
+- 2,000 attempts; 1,989 retained strict CSI profiles (994 ABSENT, 995 PRESENT).
+- 40/40 batches pass both acquisition gates; each retained feature row has 52 active tones.
+- Grouped nearest-centroid: accuracy 0.80, sensitivity 0.65, specificity 0.95, balanced accuracy 0.80 (TP=13, TN=19, FP=1, FN=7).
+- Eight candidates were compared using 20 paired-round folds and four leave-one-session-out folds. Small MLP and Random Forest both scored 0.850 grouped balanced accuracy and 0.800 pooled leave-one-session-out balanced accuracy; sensitivity was 0.60 and 0.65 respectively.
+- Leave-one-session-out performance varies: the MLP balanced accuracy is 0.60 on Session 1 and 0.80 on Sessions 2, 4 and 5; Random Forest is 0.60, 0.90, 0.90 and 0.80 respectively.
 
-The cross-session result fails. The within-development result is based on only ten paired rounds and has poor sensitivity. No model should be frozen or deployed from these data. Full details and reproducible script: docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md, tools/analyze_presence_development.py.
+No candidate demonstrates dependable generalization. Do not deploy a classifier. Full details: `docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md`, `docs/PRESENCE_MODEL_COMPARISON_20261122.md`, and their JSON reports. Session 3 was not accessed by these analyses.
 
 ## L-LTF extraction correction
 
@@ -70,7 +70,7 @@ See `docs/FINAL_PROJECT_REPORT.md` for the complete research report, acquisition
 ## Remaining work
 
 1. Verify and privately back up original labelled JSONL and raw IQ archives; the raw archive contents have not been fully verified or backed up off-device.
-2. Extend grouped/session-transfer analysis to Sessions 1, 2, 4 and 5 only. Session 4 analysis: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`. Session 5 analysis: `docs/SESSION5_ACQUISITION_ANALYSIS_20261122.md`. Session 5 had 498/500 strict structural CSI profiles, 492/500 target-attributed strict CSI profiles retained, 10/10 batches passed both gates, and RX-idle 500/500. Session 3 has already been used for its one-time benchmark evaluation and must not be reused for tuning.
+2. Obtain additional independent development data and a new untouched held-out session if a revised detector is pursued. The combined Sessions 1, 2, 4 and 5 analysis is complete. Session 4 analysis: `docs/SESSION4_ACQUISITION_ANALYSIS_20261122.md`. Session 5 analysis: `docs/SESSION5_ACQUISITION_ANALYSIS_20261122.md`. Session 5 had 498/500 strict structural CSI profiles, 492/500 target-attributed strict CSI profiles retained, 10/10 batches passed both gates, and RX-idle 500/500. Session 3 has already been used for its one-time benchmark evaluation and must not be reused for tuning.
 4. If new development evidence supports a revised model, implement explicit confidence/abstention and quality handling, freeze it, and obtain a new untouched held-out session.
 5. Integrate live inference and validate physical occupancy transitions only if a new independent held-out result supports it.
 
