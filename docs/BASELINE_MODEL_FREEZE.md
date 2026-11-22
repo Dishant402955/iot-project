@@ -41,4 +41,4 @@ No features, thresholds, hyperparameters, or preprocessing are selected using Se
 
 ## One-time evaluation rule
 
-Run `tools/evaluate_presence_heldout.py` exactly once after this freeze commit is published. The evaluator must verify the exact Session 3 source SHA-256, load only the frozen model, refuse to overwrite an existing evaluation result, and emit confusion matrix/sensitivity/specificity/balanced accuracy plus CSI availability. Do not tune or retrain after seeing the held-out result. If a model change is later made, it requires a new untouched held-out session.
+Run `tools/evaluate_presence_heldout.py` exactly once after its evaluator commit is published. The evaluator verifies the exact Session 3 source SHA-256 and frozen model hash, loads only the frozen model, refuses to overwrite an existing evaluation result, and emits confusion matrix/sensitivity/specificity/balanced accuracy plus CSI availability. The evaluator has synthetic unit tests; these do not access Session 3. Do not tune or retrain after seeing the held-out result. If a model change is later made, it requires a new untouched held-out session.

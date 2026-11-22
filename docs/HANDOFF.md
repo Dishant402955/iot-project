@@ -144,4 +144,4 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 - Model artifact: `models/presence_centroid_baseline_s1_s2_v1.json`; SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`.
 - Freeze script verifies exact source hashes for Sessions 1 and 2 and refuses alternate training inputs. Session 3 was not used.
 - Model is explicitly `NOT_VALIDATED_NOT_FOR_OCCUPANCY_DECISIONS`. It is frozen only as a benchmark for a one-time independent Session 3 evaluation.
-- Freeze specification: `docs/BASELINE_MODEL_FREEZE.md`. Next software action: add/run the one-time evaluator after this freeze commit is pushed.
+- Freeze specification: `docs/BASELINE_MODEL_FREEZE.md`. The one-time evaluator `tools/evaluate_presence_heldout.py` is implemented with a strict source/model hash check and refuses to overwrite existing results. It is being committed separately before execution.

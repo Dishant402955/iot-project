@@ -98,7 +98,7 @@ No ROC AUC or confidence interval is reported: the current diagnostic produces h
 
 ## 7. Frozen research benchmark
 
-A fixed batch-median nearest-centroid benchmark was frozen using exactly 20 batch examples from Sessions 1 and 2 (ten per class). It uses the per-tone batch median, training-only standardization, and two class centroids with squared Euclidean distance. The frozen artifact is `models/presence_centroid_baseline_s1_s2_v1.json` (SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`). Session 3 was not used. This model is frozen only to obtain one independent benchmark result; it is explicitly not a deployment candidate. The freeze protocol is documented in `docs/BASELINE_MODEL_FREEZE.md`.
+A fixed batch-median nearest-centroid benchmark was frozen using exactly 20 batch examples from Sessions 1 and 2 (ten per class). It uses the per-tone batch median, training-only standardization, and two class centroids with squared Euclidean distance. The frozen artifact is `models/presence_centroid_baseline_s1_s2_v1.json` (SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`). Session 3 was not used. This model is frozen only to obtain one independent benchmark result; it is explicitly not a deployment candidate. The freeze protocol is documented in `docs/BASELINE_MODEL_FREEZE.md`. The one-time evaluator is `tools/evaluate_presence_heldout.py`; it verifies the model and Session 3 hashes and refuses to rerun if either evaluation output already exists.
 
 ## 8. Live tool safety hardening
 
