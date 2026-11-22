@@ -155,7 +155,7 @@ void LaCapture::setup_dbg_port(const LaParams &p) {
     set_reg(kJ3LaEngine, 0x3e000u, trig_sel);
 }
 
-void LaCapture::setup_mac(const LaParams &p) {
+void LaCapture::setup_mac(const LaParams &p, LaResult &r) {
   /* phydm_la_set_mac_iq_dump. */
   _device.rtw_write8(kRegLaCtrl, 0);
   set_reg(kRegLaCtrl, 1u << 0, 1); /* LA block on */
@@ -172,7 +172,10 @@ void LaCapture::setup_mac(const LaParams &p) {
       set_reg(kRegLaCtrl, 1u << 3, 1); /* MAC-event trigger source */
       set_reg(kRegLaCtrl, 0xc0u, static_cast<uint32_t>(p.mac_sig));
     }
-    set_reg(kRegLaCtrl, 1u << 1, 1); /* poll bit, BB-ADC mode */
+    r.armed_steady_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    set_reg(kRegLaCtrl, 1u << 1, 1); /* poll bit, BB-ADC mode: arm trigger */
     if (p.trig_mode == LaTrigMode::AdcMacTrig &&
         p.mac_sig == LaMacSig::Manual) {
       /* Fire the register trigger (0x7c0[5] 0->1) only after the dump
@@ -275,7 +278,11 @@ LaResult LaCapture::run(const LaParams &p) {
   setup_trigger_time(p);
   setup_bb(p);
   setup_dbg_port(p);
-  setup_mac(p);
+  r.arm_begin_steady_us = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+  setup_mac(p, r);
 
   if (!is_chip_alive()) {
     _wedged = true;

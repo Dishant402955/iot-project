@@ -117,6 +117,7 @@ static constexpr uint16_t kRealtekProductIds[] = {
 /* Written on the RX callback thread, read by the main thread and the pollers
  * as the "bring-up produced a frame" signal, so atomic. */
 static std::atomic<int> g_rx_count{0};
+static std::atomic<long long> g_rx_last_frame_steady_us{0};
 /* Set when a worker-thread Init (the hop and sweep paths) has returned or
  * thrown: RX is no longer running, so DEVOURER_STA_IDENTITY must not arm. */
 static std::atomic<bool> g_rx_ended{false};
@@ -543,6 +544,24 @@ la_runner_for(IRadio *dev) {
 static bool run_la_capture(
     const std::function<devourer::LaResult(const devourer::LaParams &)> &runner,
     const devourer::LaParams &p, const std::string &out_path) {
+  /* Do not arm while the RX callback is still draining the previous frame.
+   * This makes the arm-window -> first-frame association deterministic rather
+   * than accidentally attributing a packet already in software's queue. */
+  const auto quiet_wait_start = std::chrono::steady_clock::now();
+  bool rx_idle_satisfied = true;
+  if (std::getenv("DEVOURER_RX_PRESENCE_META")) {
+    rx_idle_satisfied = false;
+    for (int i = 0; i < 100; ++i) {
+      const long long last = g_rx_last_frame_steady_us.load(std::memory_order_relaxed);
+      if (last && steady_us() - last >= 2000) {
+        rx_idle_satisfied = true;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  const auto quiet_wait_us = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now() - quiet_wait_start).count();
   const auto t0 = std::chrono::steady_clock::now();
   devourer::LaResult r = runner(p);
   const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -595,7 +614,15 @@ static bool run_la_capture(
   static const int kRateMhz10[] = {800, 400, 200, 100, 50, 25, 12, 1600};
   devourer::Ev(*g_ev, "la.capture")
       .t()
+      .f("arm_begin_steady_us", static_cast<unsigned long long>(r.arm_begin_steady_us))
+      .f("armed_steady_us", static_cast<unsigned long long>(r.armed_steady_us))
+      .f("done_steady_us", static_cast<unsigned long long>(steady_us()))
+      .f("rx_idle_wait_us", static_cast<unsigned long long>(quiet_wait_us))
+      .f("rx_idle", rx_idle_satisfied ? 1 : 0)
       .f("ok", 1)
+      .f("trig_mode", static_cast<uint8_t>(p.trig_mode))
+      .f("mac_sig", static_cast<uint8_t>(p.mac_sig))
+      .f("trigger_time_us", p.trigger_time_us)
       .f("samples", r.samples.size())
       .hexf("finish", r.finish_addr, 4)
       .f("wrap", r.round_up ? 1 : 0)
@@ -890,6 +917,31 @@ static void packetProcessor(const Packet &packet) {
   }
 
   ++g_rx_count;
+  g_rx_last_frame_steady_us.store(steady_us(), std::memory_order_relaxed);
+
+  /* Presence-sensing capture attribution. Unlike rx.frame/STREAM_OUT this
+   * is compact and emits metadata only: the first decoded frame after the
+   * LA hardware arm can be joined to the corresponding CRCOK snapshot. */
+  static const bool presence_meta =
+      std::getenv("DEVOURER_RX_PRESENCE_META") != nullptr;
+  if (presence_meta && packet.Data.size() >= 16) {
+    auto ev = devourer::Ev(*g_ev, "rx.presence_frame");
+    ev.t()
+        .f("steady_us", static_cast<unsigned long long>(steady_us()))
+        .f("len", packet.Data.size())
+        .f("fc0", packet.Data[0])
+        .f("fc1", packet.Data.size() > 1 ? packet.Data[1] : 0)
+        .f("rate", packet.RxAtrib.data_rate)
+        .f("rssi", packet.RxAtrib.rssi[0])
+        .f("seq", packet.RxAtrib.seq_num)
+        .f("tsfl", packet.RxAtrib.tsfl)
+        .f("crc", packet.RxAtrib.crc_err ? 1 : 0)
+        .f("icv", packet.RxAtrib.icv_err ? 1 : 0)
+        .hex("addr2", packet.Data.data() + 10, 6);
+    if (packet.Data.size() >= 22)
+      ev.hex("addr3", packet.Data.data() + 16, 6);
+  }
+
 
   /* Model the inline consumer cost that delays URB resubmit in the async ring
    * (DEVOURER_RX_SINK_SPIN_US). This runs on the libusb pump thread — the very

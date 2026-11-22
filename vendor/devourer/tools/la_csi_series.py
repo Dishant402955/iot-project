@@ -51,16 +51,20 @@ def main():
     rows_written = 0
     valid_captures = 0
     failures = []
+    capture_diagnostics = []
     with open(args.output, "w") as out:
         for index, path in enumerate(paths, 1):
+            detector_diag = {}
             try:
                 meta, words = la_decode.read_dump(path)
                 layout = args.layout or la_decode.DEFAULT_LAYOUT
                 x = la_decode.LAYOUTS[layout][1](words)
                 x = x - la_csi.np.mean(x)
-                start, cfo = la_csi.locate_lltf(x)
+                detector_diag = {}
+                start, cfo = la_csi.locate_lltf(x, diagnostics=detector_diag)
                 if start is None:
-                    raise ValueError("no L-LTF found")
+                    raise ValueError("no L-LTF passed strict quality gates")
+                quality = la_csi.lltf_quality(x, start, cfo)
                 h = la_csi.estimate_h(x, start, cfo)
                 stat = os.stat(path)
                 event_ms = events.get(path)
@@ -78,15 +82,35 @@ def main():
                         "phase_rad": float(la_csi.np.angle(hv)),
                         "lltf_start_sample": int(start),
                         "cfo_hz": float(cfo * 20e6),
+                        "lltf_repeat_corr": quality["repeat_corr"],
+                        "lltf_stf16_corr": quality["stf16_corr"],
+                        "lltf_symbol_relerr": quality["symbol_relerr"],
                         "sample_rate_mhz": float(meta["fs_mhz"]),
                     }) + "\n")
                     rows_written += 1
                 valid_captures += 1
+                capture_diagnostics.append({"capture_file": path, "status": "PASS",
+                                            "quality": quality, "detector": detector_diag})
                 print(f"CSI_SERIES_CAPTURE_PASS: {os.path.basename(path)} "
-                      f"L-LTF@{start} CFO={cfo * 20e6 / 1e3:+.1f} kHz")
+                      f"L-LTF@{start} CFO={cfo * 20e6 / 1e3:+.1f} kHz "
+                      f"repeat={quality['repeat_corr']:.3f} "
+                      f"STF16={quality['stf16_corr']:.3f} "
+                      f"symbol_err={quality['symbol_relerr']:.3f}")
             except (Exception, SystemExit) as exc:
-                failures.append((path, str(exc)))
+                failure = {"capture_file": path, "status": "FAIL", "error": str(exc),
+                           "detector": detector_diag}
+                failures.append(failure)
+                capture_diagnostics.append(failure)
                 print(f"CSI_SERIES_CAPTURE_FAIL: {path}: {exc}", file=sys.stderr)
+
+    diagnostics_path = args.output + ".diagnostics.json"
+    with open(diagnostics_path, "w") as stream:
+        json.dump({"captures_seen": len(paths), "captures_with_csi": valid_captures,
+                   "captures_failed": len(failures), "capture_results": capture_diagnostics,
+                   "interpretation": "Failure counters identify which strict L-LTF gate rejected candidates; they do not justify relaxing the gates."},
+                  stream, indent=2)
+        stream.write("\n")
+    print(f"CSI_SERIES_DIAGNOSTICS: {diagnostics_path}")
 
     if valid_captures < args.min_captures:
         try:
@@ -96,10 +120,16 @@ def main():
         print(f"FAIL: only {valid_captures} valid CSI captures; "
               f"need at least {args.min_captures}", file=sys.stderr)
         return 1
+    if valid_captures < 2:
+        print(f"CSI_SERIES_INSUFFICIENT: only {valid_captures} high-confidence "
+              f"capture(s); retained diagnostic output at {args.output}")
+        if failures:
+            print(f"WARNING: {len(failures)} capture(s) failed strict L-LTF quality checks; inspect {diagnostics_path}", file=sys.stderr)
+        return 0
     print(f"CSI_SERIES_PASS: captures={valid_captures}, tones_per_capture=52, "
           f"rows={rows_written}, output={args.output}")
     if failures:
-        print(f"WARNING: {len(failures)} capture(s) lacked usable L-LTF", file=sys.stderr)
+        print(f"WARNING: {len(failures)} capture(s) lacked usable L-LTF; inspect {diagnostics_path}", file=sys.stderr)
     return 0
 
 

@@ -98,11 +98,17 @@ enum class LaTrigMode : uint8_t {
 };
 
 enum class LaMacSig : uint8_t {
-  CrcOk = 0,   /* RX frame FCS pass */
-  CrcFail = 1, /* RX frame FCS fail */
-  Cca = 2,     /* CCA assertion */
-  Manual = 3,  /* immediate register trigger (0x7c0[5]) */
+  /* RTL8821C selector from halbb_la_mode.h: 0=CCA, 1=first CRC-OK,
+   * 2=first CRC-error. Keep this aligned with hardware encoding. */
+  Cca = 0,
+  CrcOk = 1,
+  CrcFail = 2,
+  Manual = 3, /* immediate register trigger (0x7c0[5]) */
 };
+static_assert(static_cast<uint8_t>(LaMacSig::Cca) == 0 &&
+              static_cast<uint8_t>(LaMacSig::CrcOk) == 1 &&
+              static_cast<uint8_t>(LaMacSig::CrcFail) == 2,
+              "LaMacSig hardware selector encoding mismatch");
 
 struct LaParams {
   LaTrigMode trig_mode = LaTrigMode::AdcMacTrig;
@@ -118,17 +124,24 @@ struct LaParams {
   /* BbTrig: which dbg-port bit arms the trigger. */
   uint8_t trig_sel = 0;
   uint8_t edge = 0; /* 0 = posedge, 1 = negedge */
-  /* Post-trigger sampling time; the rest of the ring is pre-trigger. */
+  /* Realtek MAC LA trigger-time register value, in microseconds. This does
+   * not set the readback sample count; exact timing relative to the selected
+   * MAC event is hardware-defined and must not be treated as capture length. */
   uint32_t trigger_time_us = 100;
   bool buff_all = false; /* double the window (full_buff_capable only) */
   uint32_t poll_ms = 100;
   uint32_t poll_tries = 20;
-  /* Cap readback (8-byte samples read, oldest-first); 0 = whole window. */
+  /* Cap readback (8-byte samples read, oldest-first); 0 = whole capture. */
   uint32_t max_samples = 0;
 };
 
 struct LaResult {
   bool ok = false;
+  /* steady_clock epoch in microseconds. arm_begin is sampled just before
+   * MAC setup; armed is sampled immediately before enabling the BB-ADC poll
+   * bit, which is the trigger-arm boundary for this capture mode. */
+  uint64_t arm_begin_steady_us = 0;
+  uint64_t armed_steady_us = 0;
   bool wedged = false;
   bool poll_timeout = false;
   /* 0x7c0 read back all-zero after arm: the LA capture block is not
@@ -160,7 +173,7 @@ class LaCapture {
   void setup_trigger_time(const LaParams &p);
   void setup_bb(const LaParams &p);
   void setup_dbg_port(const LaParams &p);
-  void setup_mac(const LaParams &p);
+  void setup_mac(const LaParams &p, LaResult &r);
   bool poll(const LaParams &p);
   void readback(const LaParams &p, LaResult &r);
   void snapshot();

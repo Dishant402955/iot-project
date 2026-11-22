@@ -5,9 +5,9 @@
 - Confirmed once on target hardware: 8,192 raw IQ samples at 20 Msps, RTL8821C cut 4 (UMC), L-LTF detection, 52 active-subcarrier H(k) magnitude/phase estimates.
 - Implemented: sequential capture/re-arm in one `rxdemo` process; each capture gets a distinct DVLA file; successful capture events include monotonic process uptime; graceful stop after the configured count; per-capture CSI extraction into a combined JSONL.
 - Software validation: `rxdemo` builds; `LaCaptureSequenceSelftest` passes; `la_csi_math` passes.
-- Hardware repeated-capture run (2026-11-21): 10/10 distinct 8,192-sample raw IQ captures succeeded and the driver restored. Only 1/10 contained a detectable L-LTF. The run used a CRC-OK (frame-end) trigger with a 409.6 us ring and 20 us post-trigger; this can omit the preamble of longer frames.
+- Hardware repeated-capture run (2026-11-21): 10/10 distinct 8,192-sample raw IQ captures succeeded and the driver restored. Only 1/10 contained a detectable L-LTF. The run used a CRC-OK (frame-end) trigger. The vendor `t<us>` parameter configures the MAC LA trigger-time register; it does not set the number of samples returned. A CRC-OK frame-end trigger still cannot include that frame's earlier L-LTF.
 - CCA-triggered hardware run (2026-11-21): 10/10 captures completed, but 3/10 IQ buffers were constant and only 1/10 contained a detectable L-LTF. The channel was 2.4 GHz channel 2. CCA can trigger on channel activity that is not an OFDM frame with an L-LTF (for example, legacy CCK traffic), so a successful CCA capture is not necessarily a usable CSI sample.
-- Next acquisition keeps the documented CCA `/t200` settings and increases the sequence to 30 captures. This tests whether a longer sample yields enough OFDM/L-LTF frames; it does not assume CCA itself guarantees an L-LTF.
+- The historical `/t200` experiment changed the MAC LA trigger-time register, not the sample-window length. Both t20 and t200 runs returned 8192 samples. See [the trigger-time investigation](LA_TRIGGER_TIME_INVESTIGATION.md) before changing this setting again.
 
 ## Run
 
@@ -17,7 +17,7 @@ From the project root, at the physical console of the laptop:
 sudo bash tools/rtl8821ce_pcie_la_capture.sh
 ```
 
-The current channel is auto-detected from `wlp1s0` before binding. Defaults are CCA-triggered capture with 200 us post-trigger, 30 captures, 1,000 ms between captures, and a 120-second overall deadline. The adapter is temporarily detached from `rtw_8821ce` while VFIO owns it, so Wi-Fi is unavailable during the run. The script does not restart NetworkManager or reboot. Its exit trap restores `rtw_8821ce` and, when invoked through sudo, transfers the result directory back to the invoking user.
+The current channel is auto-detected from `wlp1s0` before binding. The current qualification script defaults to CCA-triggered capture with a 20 us MAC trigger-time setting, 50 captures, and immediate re-arm. The sample count is determined by the LA buffer configuration, not this trigger-time value. The historical script defaults described below do not apply to the current script. The adapter is temporarily detached from `rtw_8821ce` while VFIO owns it, so Wi-Fi is unavailable during the run. The script does not restart NetworkManager or reboot. Its exit trap restores `rtw_8821ce` and, when invoked through sudo, transfers the result directory back to the invoking user.
 
 Optional environment settings:
 
@@ -25,7 +25,7 @@ Optional environment settings:
 - `WIFI_PRESENCE_CAPTURE_INTERVAL_MS`: 100–10,000 ms (default 1,000).
 - `WIFI_PRESENCE_CAPTURE_TIMEOUT_SEC`: overall acquisition deadline (default 120).
 - `WIFI_PRESENCE_LA_TRIGGER`: `cca` (default), `crcok`, or `crcfail`.
-- `WIFI_PRESENCE_LA_POST_TRIGGER_US`: post-trigger time in microseconds (20–380, default 200).
+- `WIFI_PRESENCE_LA_TRIGGER_TIME_US`: Realtek MAC LA trigger-time register value in microseconds (1–8191, default 20). Old `WIFI_PRESENCE_LA_CAPTURE_DURATION_US` and `WIFI_PRESENCE_LA_POST_TRIGGER_US` names remain compatibility aliases only; they do not represent capture duration.
 
 ## Outputs
 

@@ -46,9 +46,10 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="la-csi-series-") as tmp:
         captures = []
-        for index in range(2):
+        for index in range(3):
             path = os.path.join(tmp, f"capture.{index + 1:04d}.bin")
-            make_dump(path, samples)
+            make_dump(path, samples if index < 2 else
+                      0.2 * (rng.standard_normal(8192) + 1j * rng.standard_normal(8192)))
             captures.append(path)
         events = os.path.join(tmp, "rxdemo.jsonl")
         with open(events, "w") as stream:
@@ -73,7 +74,20 @@ def main():
                    for i in (1, 2))
         assert all(np.isfinite(row["mag"]) and np.isfinite(row["phase_rad"])
                    for row in rows)
-        print("la_csi_series_selftest: PASS (2 captures, 104 tone rows)")
+        diagnostics = json.load(open(output + ".diagnostics.json"))
+        assert diagnostics["captures_seen"] == 3
+        assert diagnostics["captures_with_csi"] == 2
+        assert diagnostics["captures_failed"] == 1
+        rejected = diagnostics["capture_results"][-1]
+        assert rejected["status"] == "FAIL"
+        assert rejected["detector"].get("reason") in {
+            "lag_candidates_rejected", "no_matched_filter_candidate"}
+        # Fallback rejection diagnostics must expose measured quality, not
+        # leave every metric null when the primary lag detector finds none.
+        assert rejected["detector"].get("fallback_candidates", 0) > 0
+        assert rejected["detector"].get("fallback_best_repeat_corr") is not None
+        assert rejected["detector"].get("fallback_best_start") is not None
+        print("la_csi_series_selftest: PASS (2 valid + 1 rejected, fallback metrics retained)")
     return 0
 
 

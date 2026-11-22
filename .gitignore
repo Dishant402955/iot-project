@@ -38,3 +38,25 @@ __pycache__/
 *.csv
 !/data/
 !/data/*.csv
+
+# RF-DS reproduction environment and downloaded reference data
+/.venv-rfds/
+/data/rfds-reference/**/*.csv
+/data/rfds-reference/.cache/
+/research/rfds-reproduction/outputs/
+/research/rfds-reproduction/__pycache__/
+/research/rfds-reproduction/tests/__pycache__/
+
+# Downloaded RF-DS reference dataset (retain its README only)
+/data/rfds-reference/*
+!/data/rfds-reference/README.md
+/data/rfds-reference/**/
+!/data/rfds-reference/**/README.md
+/research/rfds-reproduction/outputs/*.joblib
+
+# Local room-specific measurements and calibration (never publish)
+/data/live_presence_baseline.json
+/data/presence_dataset/
+/data/presence_dataset_raw/
+/data/presence_dataset_rssi/
+/data/presence_analysis/

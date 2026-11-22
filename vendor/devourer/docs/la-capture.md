@@ -39,12 +39,21 @@ python3 tools/la_decode.py plot  /tmp/la.bin                 # PSD + |x|
 python3 tools/la_csi.py /tmp/la.bin --plot h.png             # per-tone H(k)
 ```
 
+RTL8821C ADC/MAC selector values follow Realtek la_mac_and0_sel:
+0=CCA, 1=first CRC-OK, 2=first CRC-error. LaMacSig must preserve this
+hardware mapping.
+
 Spec grammar: `<trig>[/<rate>M][/dma<N>][/port:0xNNN[.hdr<H>][.bit<B>]]`
 `[/edge<0|1>][/t<us>][/all]` — `<trig>` ∈ `manual|crcok|crcfail|cca|bb|mac`.
-`t<us>` is the post-trigger time; the rest of the ring is pre-trigger, so
-a `crcok` capture (trigger = frame **end**) holds the whole frame
-including the preamble. `DEVOURER_LA_MAX` caps readback and keeps the
-**newest** samples (the trigger vicinity). `DEVOURER_LA_DELAY_MS`
+`t<us>` configures Realtek's MAC LA trigger-time register in microseconds;
+it does not set the IQ sample count or the duration of the readback buffer.
+The RTL8821C run inspected here returns 8,192 complex samples at 20 Msps
+(409.6 us of samples) for both `t20` and `t200`. The exact timing relationship
+between this register and the selected MAC event must be established from
+hardware behavior; do not interpret `t<us>` as a sample-window length.
+`buff_all` selects the maximum available TXFF storage.
+A CRCOK event occurs at frame end and therefore cannot capture that frame's earlier L-LTF; CCA is the useful early-frame trigger for CSI.
+`DEVOURER_LA_MAX` caps readback and keeps the **newest** samples. `DEVOURER_LA_DELAY_MS`
 (default 2000) is the arm delay after RX is live. The demo writes a
 32-byte `DVLA` header + LE u64 records; events: `la.capture`,
 `la.timeout`, `la.nosupport`, `la.wedged`.

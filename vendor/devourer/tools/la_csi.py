@@ -12,9 +12,12 @@ host path.
     la_csi.py --selftest        # synthetic L-LTF through a 2-tap channel
 
 Requires a capture at 20 Msps of a 20 MHz channel (the standard L-LTF
-sample grid): prefer a CCA-triggered capture such as
-DEVOURER_LA_CAPTURE=cca/20M/dma0/port:0x880/t200/all. A CRC-OK trigger
-fires at frame end; the finite ring can exclude the preamble of long frames.
+sample grid). Prefer a true CCA-triggered capture at 20 Msps. The `t<us>`
+CLI field configures Realtek's MAC LA trigger-time register; it does not set
+the number of samples in the IQ buffer. The RTL8821C MAC selector encoding is 0=CCA,
+1=first CRC-OK, 2=first CRC-error; keep these values aligned with LaMacSig.
+A CRC-OK trigger fires at frame end and can exclude the preamble of long
+frames.
 
 Detection: 64-lag autocorrelation plateau (the LTF's two identical
 periods), refined by cross-correlation against the reference symbol.
@@ -59,16 +62,46 @@ def ltf_ref_time():
     return np.fft.ifft(ltf_freq64())
 
 
-def locate_lltf(x, min_metric=0.6):
-    """Find the start of the first LTF 64-sample period.
+def lltf_quality(x, start, cfo_norm):
+    """Return independent repeated-LTF quality checks for one candidate.
 
-    Returns (start_index, cfo_norm) or (None, 0). cfo_norm is the
-    frequency offset in cycles/sample estimated from the phase drift
-    between the two repetitions."""
+    The two L-LTF symbols are identical after CFO correction. A candidate
+    that merely resembles a 64-sample repetition is not sufficient: we also
+    reject the 16-sample L-STF periodicity and compare the two LTF FFTs on the
+    52 active subcarriers. Thresholds are deliberately conservative.
+    """
+    if start < 0 or start + 128 > len(x):
+        return {"repeat_corr": 0.0, "stf16_corr": 1.0, "symbol_relerr": 1.0}
+    raw = x[start:start + 128]
+    a_raw, b_raw = raw[:64], raw[64:128]
+    repeat_corr = float(abs(np.vdot(a_raw, b_raw)) / (
+        np.linalg.norm(a_raw) * np.linalg.norm(b_raw) + 1e-12))
+    r16 = float(abs(np.vdot(raw[:-16], raw[16:])) / (
+        np.linalg.norm(raw[:-16]) * np.linalg.norm(raw[16:]) + 1e-12))
+    n = np.arange(start, start + 128)
+    corrected = raw * np.exp(-2j * np.pi * cfo_norm * n)
+    f1 = np.fft.fft(corrected[:64])
+    f2 = np.fft.fft(corrected[64:128])
+    active = np.asarray([k % 64 for k, v in zip(TONES, LTF_SEQ) if v != 0])
+    symbol_relerr = float(np.linalg.norm((f1 - f2)[active]) / (
+        np.linalg.norm(f1[active]) + np.linalg.norm(f2[active]) + 1e-12))
+    return {"repeat_corr": repeat_corr, "stf16_corr": r16,
+            "symbol_relerr": symbol_relerr}
+
+
+def locate_lltf(x, min_metric=0.6, diagnostics=None):
+    """Find a high-confidence L-LTF in the complex baseband stream.
+
+    Returns (start_index, cfo_norm) or (None, 0.0). In addition to the
+    64-lag plateau and reference correlation, a candidate must pass three
+    independent checks: >=0.85 repeated-symbol coherence, <=0.50 16-lag
+    STF coherence, and <=0.25 relative mismatch between CFO-corrected LTF
+    FFTs. These conservative gates prevent weak periodic noise from being
+    reported as CSI.
+    """
     n = len(x)
     if n < 192:
         return None, 0.0
-    # 64-lag autocorrelation plateau (two identical periods).
     lag = 64
     c = x[:n - lag] * np.conj(x[lag:])
     p = np.abs(x[lag:]) ** 2
@@ -77,45 +110,128 @@ def locate_lltf(x, min_metric=0.6):
     num = np.convolve(c, ker, "valid")
     den = np.convolve(p, ker, "valid") + 1e-12
     metric = np.abs(num) / den
-    # Candidate plateau peaks, best first.
     ref = ltf_ref_time()
     best = None
+    best_score = -1.0
+    diag = diagnostics if diagnostics is not None else None
+    if diag is not None:
+        diag.update({"lag_candidates": 0, "repeat_reject": 0,
+                     "stf16_reject": 0, "symbol_reject": 0,
+                     "fallback_candidates": 0, "fallback_repeat_reject": 0,
+                     "fallback_stf16_reject": 0, "fallback_symbol_reject": 0,
+                     "best_repeat_corr": None, "best_stf16_corr": None,
+                     "best_symbol_relerr": None,
+                     "fallback_best_repeat_corr": None,
+                     "fallback_best_stf16_corr": None,
+                     "fallback_best_symbol_relerr": None,
+                     "fallback_best_start": None,
+                     "reason": "no_lag_candidate"})
+    seen_lag_starts = set()
     for idx in np.argsort(metric)[::-1][:2000]:
         if metric[idx] < min_metric:
             break
-        # Refine with cross-correlation against the reference in a small
-        # neighbourhood (plateau peaks are timing-ambiguous by design).
         lo = max(0, idx - 96)
         hi = min(n - 128, idx + 96)
         if hi <= lo:
             continue
         seg = x[lo:hi + 128]
         cc = np.abs(np.correlate(seg, ref, "valid"))
-        k = int(np.argmax(cc))
-        start = lo + k
-        if start + 128 > n:
+        peak_start = lo + int(np.argmax(cc))
+
+        # The two L-LTF symbols are identical. A single-symbol matched filter
+        # therefore has two nearly equal peaks, one at the true pair start and
+        # one 64 samples later. Choosing only argmax can select the SECOND
+        # symbol, causing the following SIGNAL field to be tested as symbol 2
+        # and rejecting a perfectly valid L-LTF. Test both alignments (plus
+        # the adjacent period for timing-edge cases) and let the independent
+        # two-symbol quality gates decide which is the real pair.
+        for start in (peak_start - 64, peak_start, peak_start + 64):
+            if start < 0 or start + 128 > n or start in seen_lag_starts:
+                continue
+            seen_lag_starts.add(start)
+            a, b = x[start:start + 64], x[start + 64:start + 128]
+            acc = np.vdot(a, b)
+            cfo_norm = np.angle(acc) / (2 * np.pi * 64)
+            quality = lltf_quality(x, start, cfo_norm)
+            if diag is not None:
+                diag["lag_candidates"] += 1
+                if (diag["best_repeat_corr"] is None or
+                        quality["repeat_corr"] > diag["best_repeat_corr"]):
+                    diag["best_repeat_corr"] = quality["repeat_corr"]
+                    diag["best_stf16_corr"] = quality["stf16_corr"]
+                    diag["best_symbol_relerr"] = quality["symbol_relerr"]
+            if quality["repeat_corr"] < 0.85:
+                if diag is not None: diag["repeat_reject"] += 1
+                continue
+            if quality["stf16_corr"] > 0.50:
+                if diag is not None: diag["stf16_reject"] += 1
+                continue
+            if quality["symbol_relerr"] > 0.25:
+                if diag is not None: diag["symbol_reject"] += 1
+                continue
+            if diag is not None: diag["reason"] = "accepted_lag_candidate"
+            score = (quality["repeat_corr"] - quality["stf16_corr"] -
+                     quality["symbol_relerr"])
+            if score > best_score:
+                best = (start, cfo_norm)
+                best_score = score
+    if best is not None:
+        return best
+
+    # Fallback: the lag-metric shortlist above can miss a real L-LTF when a
+    # strong neighbouring periodic component dominates its top-2000 indices.
+    # Search the full capture with a normalized matched filter, then apply
+    # exactly the same three independent quality gates. This is not a relaxed
+    # detector: candidates still need repeated-symbol coherence, L-STF
+    # rejection, and agreement between the two CFO-corrected LTF FFTs.
+    if diag is not None:
+        diag["reason"] = "lag_candidates_rejected"
+    ref_energy = float(np.vdot(ref, ref).real)
+    matched = np.abs(np.correlate(x, ref, "valid"))
+    local_energy = np.convolve(np.abs(x) ** 2, np.ones(64), "valid")
+    scores = matched / (np.sqrt(local_energy * ref_energy) + 1e-12)
+    order = np.argsort(scores)[::-1]
+    tried_peaks = []
+    seen_fallback_starts = set()
+    for raw_idx in order:
+        idx = int(raw_idx)
+        if len(tried_peaks) >= 300:
+            break
+        # Peaks 64 samples apart can be the two copies of the same L-LTF.
+        # Do not collapse them before checking both possible pair alignments.
+        if any(abs(idx - previous) < 16 for previous in tried_peaks):
             continue
-        # Sanity: the two 64-blocks must actually repeat.
-        a, b = x[start:start + 64], x[start + 64:start + 128]
-        rep = np.abs(np.vdot(a, b)) / (np.linalg.norm(a) * np.linalg.norm(b)
-                                       + 1e-12)
-        if rep < 0.5:
-            continue
-        # Reject the L-STF: its 16-sample periodicity also repeats at lag
-        # 64 (and its tone comb aliases into an LTF-looking estimate). A
-        # true LTF has LOW 16-lag self-similarity.
-        blk = x[start:start + 128]
-        r16 = np.abs(np.vdot(blk[:-16], blk[16:])) / (
-            np.linalg.norm(blk[:-16]) * np.linalg.norm(blk[16:]) + 1e-12)
-        if r16 > 0.8:
-            continue
-        best = (start, np.vdot(a, b))
-        break
-    if best is None:
-        return None, 0.0
-    start, acc = best
-    cfo_norm = np.angle(acc) / (2 * np.pi * 64)
-    return start, cfo_norm
+        tried_peaks.append(idx)
+        for start in (idx - 64, idx, idx + 64):
+            if start < 0 or start + 128 > n or start in seen_fallback_starts:
+                continue
+            seen_fallback_starts.add(start)
+            a, b = x[start:start + 64], x[start + 64:start + 128]
+            acc = np.vdot(a, b)
+            cfo_norm = np.angle(acc) / (2 * np.pi * 64)
+            quality = lltf_quality(x, start, cfo_norm)
+            if diag is not None:
+                diag["fallback_candidates"] += 1
+                if (diag["fallback_best_repeat_corr"] is None or
+                        quality["repeat_corr"] > diag["fallback_best_repeat_corr"]):
+                    diag["fallback_best_repeat_corr"] = quality["repeat_corr"]
+                    diag["fallback_best_stf16_corr"] = quality["stf16_corr"]
+                    diag["fallback_best_symbol_relerr"] = quality["symbol_relerr"]
+                    diag["fallback_best_start"] = start
+            if quality["repeat_corr"] < 0.85:
+                if diag is not None: diag["fallback_repeat_reject"] += 1
+                continue
+            if quality["stf16_corr"] > 0.50:
+                if diag is not None: diag["fallback_stf16_reject"] += 1
+                continue
+            if quality["symbol_relerr"] > 0.25:
+                if diag is not None: diag["fallback_symbol_reject"] += 1
+                continue
+            if diag is not None: diag["reason"] = "accepted_fallback_candidate"
+            return start, cfo_norm
+    if diag is not None and diag["reason"] != "lag_candidates_rejected":
+        diag["reason"] = "no_matched_filter_candidate"
+    return None, 0.0
 
 
 def refine_cfo(x, start, max_periods=8, min_rep=0.5):
@@ -232,6 +348,38 @@ def selftest():
     print(f"selftest: LTF@{start} cfo_err={cfo_err_khz:.2f} kHz "
           f"|H| corr={corr:.4f}")
     assert corr > 0.99, f"selftest: |H(k)| correlation {corr:.4f} <= 0.99"
+    # A noise-only capture must not be promoted to CSI by either detector.
+    noise = 0.2 * (rng.standard_normal(8192) + 1j * rng.standard_normal(8192))
+    noise_start, _ = locate_lltf(noise)
+    assert noise_start is None, f"selftest: noise falsely detected as L-LTF@{noise_start}"
+    print("selftest: noise rejection PASS")
+
+    # Regression: the matched-filter peaks at both identical L-LTF symbols.
+    # Make the second symbol's single-symbol peak slightly stronger so a
+    # single-argmax implementation locks 64 samples late and compares the
+    # second LTF symbol with SIGNAL instead of comparing the LTF pair.
+    alignment_ltf = np.concatenate([ref[-32:], ref.copy(), ref.copy()])
+    alignment_ltf[32:96] += 0.008 * (
+        rng.standard_normal(64) + 1j * rng.standard_normal(64))
+    alignment_offset = 1000
+    alignment_x = np.zeros(8192, dtype=complex)
+    alignment_signal = alignment_ltf * np.exp(
+        2j * np.pi * cfo_true * np.arange(len(alignment_ltf)))
+    alignment_x[alignment_offset:alignment_offset + len(alignment_signal)] = alignment_signal
+    matched = np.abs(np.correlate(alignment_x, ref, "valid"))
+    expected_start = alignment_offset + 32
+    assert matched[expected_start + 64] > matched[expected_start], (
+        "selftest: regression fixture did not make the second LTF peak stronger")
+    aligned_start, aligned_cfo = locate_lltf(alignment_x)
+    assert aligned_start == expected_start, (
+        f"selftest: repeated-symbol alignment selected {aligned_start}, "
+        f"expected {expected_start}")
+    aligned_quality = lltf_quality(alignment_x, aligned_start, aligned_cfo)
+    assert (aligned_quality["repeat_corr"] >= 0.85 and
+            aligned_quality["stf16_corr"] <= 0.50 and
+            aligned_quality["symbol_relerr"] <= 0.25), (
+        f"selftest: recovered alignment failed strict gates: {aligned_quality}")
+    print("selftest: repeated-symbol alignment regression PASS")
     print("selftest: PASS")
     return 0
 

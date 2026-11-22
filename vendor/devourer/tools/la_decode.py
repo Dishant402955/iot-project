@@ -61,6 +61,9 @@ def read_dump(path):
             "trigger_time_us": struct.unpack_from("<I", hdr, 20)[0],
         }
         meta["fs_mhz"] = RATE_MHZ.get(meta["smp_rate"], 20.0)
+        meta["mac_sig_name"] = {
+            0: "cca", 1: "crcok", 2: "crcfail", 3: "manual"
+        }.get(meta["mac_sig"], "unknown")
         words = np.fromfile(f, dtype="<u8", count=meta["n"])
     return meta, words
 
