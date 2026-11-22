@@ -96,7 +96,11 @@ Both transfer tests predicted every test batch as ABSENT. This is a decisive fai
 
 No ROC AUC or confidence interval is reported: the current diagnostic produces hard batch decisions and only ten paired rounds are available. Reporting a misleadingly precise statistic would add decoration, not evidence.
 
-## 7. Live tool safety hardening
+## 7. Frozen research benchmark
+
+A fixed batch-median nearest-centroid benchmark was frozen using exactly 20 batch examples from Sessions 1 and 2 (ten per class). It uses the per-tone batch median, training-only standardization, and two class centroids with squared Euclidean distance. The frozen artifact is `models/presence_centroid_baseline_s1_s2_v1.json` (SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`). Session 3 was not used. This model is frozen only to obtain one independent benchmark result; it is explicitly not a deployment candidate. The freeze protocol is documented in `docs/BASELINE_MODEL_FREEZE.md`.
+
+## 8. Live tool safety hardening
 
 Because channel anomalies and spectral drift are not occupancy-specific, `tools/live_presence_detector.py` is now a channel-anomaly monitor only:
 
@@ -109,12 +113,13 @@ Because channel anomalies and spectral drift are not occupancy-specific, `tools/
 
 The existing empty-room baseline was not modified. `INSUFFICIENT_CSI` remains distinct from ABSENT and must never be treated as evidence that the room is empty.
 
-## 8. Reproducibility and tests
+## 9. Reproducibility and tests
 
 From the repository root:
 
 ```bash
 vendor/.venv/bin/python tools/analyze_presence_development.py
+vendor/.venv/bin/python tools/freeze_presence_baseline_model.py
 vendor/.venv/bin/python -m unittest discover -s tests -v
 vendor/.venv/bin/python vendor/devourer/tools/la_csi.py --selftest
 vendor/.venv/bin/python vendor/devourer/tests/la_csi_series_selftest.py
@@ -125,7 +130,7 @@ git diff --check
 
 Latest offline verification: 33 Python unit tests passed; L-LTF self-test passed; CSI-series self-test passed; Python compilation passed; capture shell syntax passed; existing C++ test executable passed; baseline hash unchanged. A fresh CMake rebuild/CTest could not be verified in the remote workspace because a working CMake installation was unavailable (the bundled binary could not load `libjsoncpp.so.25`).
 
-## 9. Limitations and remaining physical work
+## 10. Limitations and remaining physical work
 
 1. Only two sessions are currently available for development analysis; Session 3 is reserved held-out.
 2. Cross-session sensitivity is zero in both transfer directions for the current diagnostic.
@@ -137,7 +142,7 @@ Latest offline verification: 33 Python unit tests passed; L-LTF self-test passed
 
 Two additional independent development sessions (Sessions 4 and 5) are needed, preferably on separate days/time blocks. Analyze Sessions 1, 2, 4, and 5 only. The analysis tool accepts repeated `--session` arguments and rejects Session 3 by its source SHA-256 even if renamed. If cross-session validation remains weak, the appropriate project conclusion is that this hardware/setup did not demonstrate reliable stationary-presence detection. A new untouched held-out session would then be required for any revised detector.
 
-## 10. Final conclusion
+## 11. Final conclusion
 
 The project successfully delivered a repeatable CSI acquisition path, strict extraction and quality gates, interleaved labelled datasets, anonymized public feature releases, reproducible development analysis, safety-oriented live-tool behavior, and project documentation.
 

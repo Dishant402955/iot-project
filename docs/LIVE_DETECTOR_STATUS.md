@@ -53,6 +53,10 @@ The matched-filter extractor could select the second of the two repeated 64-samp
 - Drift indicators (common gain, spectral slope, tone spread, RSSI, CFO) remain diagnostics/nuisance variables until validated as features.
 - The empty-room baseline is unchanged and must not be overwritten without explicit approval.
 
+## Frozen benchmark model
+
+A non-deployable batch-median nearest-centroid benchmark is frozen from Sessions 1 and 2 solely for a one-time Session 3 evaluation. It has no calibrated confidence/abstention and must not drive occupancy decisions. Specification: `docs/BASELINE_MODEL_FREEZE.md`.
+
 ## Final project report
 
 See `docs/FINAL_PROJECT_REPORT.md` for the complete research report, acquisition method, session results, validation metrics, limitations, and reproducibility commands.

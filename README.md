@@ -8,7 +8,7 @@ Academic research prototype investigating whether a Realtek RTL8821CE 1T1R adapt
 
 Three interleaved sessions have been collected. Sessions 1 and 2 are development data; Session 3 is reserved as held-out and has not been used for model selection. Sessions 1 and 2 contain 999 valid strict CSI profiles from 1,000 attempts, with all 20 batches passing acquisition gates. A grouped batch-median nearest-centroid diagnostic gives 0.80 balanced accuracy but only 0.60 sensitivity. Cross-session transfer in both directions gives 0.50 balanced accuracy and 0.00 sensitivity, predicting every batch as ABSENT. This is not useful generalization.
 
-The live tool `tools/live_presence_detector.py` has therefore been made a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
+A simple nearest-centroid benchmark has now been frozen from Sessions 1 and 2 for a one-time Session 3 evaluation; it is not a deployment candidate. The live tool `tools/live_presence_detector.py` remains a **channel-anomaly monitor only**. It reports `UNKNOWN_UNVALIDATED` for occupancy and displays anomaly diagnostics without translating them into PRESENT/ABSENT. It also enforces the strict tone/source/CSI/RX-idle gates and refuses to overwrite an existing baseline unless `--replace-baseline` is explicitly supplied. The saved baseline is not changed by this release.
 
 ## Clone and build
 
@@ -24,6 +24,7 @@ The isolated Devourer setup downloads build dependencies under `vendor/.local-de
 ## Evidence and reports
 
 - [Final project report](docs/FINAL_PROJECT_REPORT.md): research question, acquisition method, results, limitations, and final conclusion.
+- [Frozen benchmark model](docs/BASELINE_MODEL_FREEZE.md): fixed Session 1/2 centroid model and held-out evaluation protocol.
 - [Development analysis](docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md): Sessions 1 and 2 only, with grouped and cross-session evaluation.
 - [Live detector status](docs/LIVE_DETECTOR_STATUS.md): acquisition evidence, detector semantics, and next milestones.
 - [Project execution plan](docs/PROJECT_EXECUTION_PLAN.md): authoritative milestones and integrity constraints.

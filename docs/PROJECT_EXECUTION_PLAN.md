@@ -39,6 +39,10 @@ A batch-median, nearest-centroid diagnostic with leave-one-session-round-pair-ou
 
 See docs/PRESENCE_DEVELOPMENT_ANALYSIS_20261122.md and its machine-readable JSON result.
 
+## Frozen benchmark model
+
+A simple batch-median nearest-centroid benchmark is frozen from Sessions 1 and 2 in `models/presence_centroid_baseline_s1_s2_v1.json`. It is not a deployment candidate. Its sole purpose is a one-time held-out benchmark on Session 3 without further tuning. See `docs/BASELINE_MODEL_FREEZE.md`.
+
 ## Remaining milestones
 
 ### 1. Secure original data

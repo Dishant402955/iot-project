@@ -136,3 +136,12 @@ bash -n tools/rtl8821ce_pcie_la_capture.sh
 - Current offline test suite: 33 Python tests passed; L-LTF self-test, CSI-series self-test, Python compilation, shell syntax, and existing C++ test executable passed.
 - Empty-room baseline SHA-256 remains `2c00f530172d3849dcf7f54a3cf557821845742a7e7b1d2f2b4982cde5084d74`.
 - No physical capture was run during this software-only pass. Sessions 4 and 5, private raw-data backup, and live hardware transition checks remain user-console dependencies.
+
+
+## Frozen baseline benchmark (2026-11-22)
+
+- Froze `profile_median_nearest_centroid_sessions_1_2_v1` using exactly 20 batch medians (10 ABSENT, 10 PRESENT) from Sessions 1 and 2.
+- Model artifact: `models/presence_centroid_baseline_s1_s2_v1.json`; SHA-256 `43560a6e2c5f9ca67c81c07e732fb990fd1fff49c792565df04ea448a2a25b02`.
+- Freeze script verifies exact source hashes for Sessions 1 and 2 and refuses alternate training inputs. Session 3 was not used.
+- Model is explicitly `NOT_VALIDATED_NOT_FOR_OCCUPANCY_DECISIONS`. It is frozen only as a benchmark for a one-time independent Session 3 evaluation.
+- Freeze specification: `docs/BASELINE_MODEL_FREEZE.md`. Next software action: add/run the one-time evaluator after this freeze commit is pushed.
