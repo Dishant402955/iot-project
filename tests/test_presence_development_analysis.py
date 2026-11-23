@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import numpy as np
 
@@ -61,6 +62,32 @@ class PresenceDevelopmentAnalysisTests(unittest.TestCase):
         self.assertEqual(set(analysis.ALLOWED_SESSION_SHA256), set(analysis.ALLOWED_SESSION_FILES))
         self.assertNotIn(analysis.HELD_OUT_SESSION_3_SHA256, set(analysis.ALLOWED_SESSION_SHA256.values()))
         self.assertEqual(len(analysis.HELD_OUT_SESSION_3_SHA256), 64)
+
+    def test_consumed_session_three_is_rejected_without_any_file_io(self):
+        candidate = ROOT / 'data/presence_dataset/interleaved_20261122_185040.jsonl'
+        with patch.object(Path, 'is_file', side_effect=AssertionError('file access attempted')):
+            with patch.object(Path, 'read_bytes', side_effect=AssertionError('file read attempted')):
+                with patch.object(Path, 'open', side_effect=AssertionError('file open attempted')):
+                    with self.assertRaisesRegex(ValueError, 'non-allowlisted'):
+                        analysis.validate_development_sessions((candidate, analysis.DEFAULT_SESSIONS[0]))
+
+    def test_duplicate_session_paths_are_rejected(self):
+        candidate = analysis.DEFAULT_SESSIONS[0]
+        with self.assertRaisesRegex(ValueError, 'Duplicate development session paths'):
+            analysis.validate_development_sessions((candidate, candidate))
+
+    def test_source_hash_mismatch_is_rejected(self):
+        candidate = analysis.DEFAULT_SESSIONS[0]
+        with patch.object(Path, 'read_bytes', return_value=b'changed source'):
+            with self.assertRaisesRegex(ValueError, 'source hash mismatch'):
+                analysis.validate_development_sessions((candidate, analysis.DEFAULT_SESSIONS[1]))
+
+    def test_analysis_configuration_never_includes_consumed_session_three(self):
+        self.assertEqual(
+            set(analysis.ALLOWED_SESSION_FILES.values()),
+            {1, 2, 4, 5},
+        )
+        self.assertNotIn(3, analysis.ALLOWED_SESSION_FILES.values())
 
 
 if __name__ == '__main__':

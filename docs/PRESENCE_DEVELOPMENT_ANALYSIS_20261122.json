@@ -1,0 +1,252 @@
+{
+  "analysis_scope": "4 allowlisted development sessions (Sessions [1, 2, 4, 5]); consumed held-out Session 3 was not accessed",
+  "sessions": [
+    {
+      "session_id": 1,
+      "sha256": "c18489c749c1b7e55effbe2c42a3a4c9a88cd39110419264d1c6f43b93c70836"
+    },
+    {
+      "session_id": 2,
+      "sha256": "4faca4b438b6bba0bfb2572fa5c4f4cf59558c780d815762f78fb18f51e5f553"
+    },
+    {
+      "session_id": 4,
+      "sha256": "15fb6d54295d945ab7e64cb5dd64009d33be9afac74f701e8e70713f76d44eca"
+    },
+    {
+      "session_id": 5,
+      "sha256": "43dce1a015e5291de578d1c9128f51bf130a74ef9c0c9fbba81fa3419e5156db"
+    }
+  ],
+  "counts": {
+    "attempts": 2000,
+    "valid_profiles": 1989,
+    "absent_profiles": 994,
+    "present_profiles": 995,
+    "batches": 40,
+    "batches_passing_acquisition_gates": 40
+  },
+  "grouped_leave_one_session_round_out_batch_metrics": {
+    "n_batches": 40,
+    "tp": 13,
+    "tn": 19,
+    "fp": 1,
+    "fn": 7,
+    "accuracy": 0.8,
+    "sensitivity": 0.65,
+    "specificity": 0.95,
+    "balanced_accuracy": 0.8
+  },
+  "session_transfer_metrics": {
+    "train_sessions_[2, 4, 5]_test_session_1": {
+      "n_batches": 10,
+      "tp": 1,
+      "tn": 5,
+      "fp": 0,
+      "fn": 4,
+      "accuracy": 0.6,
+      "sensitivity": 0.2,
+      "specificity": 1.0,
+      "balanced_accuracy": 0.6
+    },
+    "train_sessions_[1, 4, 5]_test_session_2": {
+      "n_batches": 10,
+      "tp": 5,
+      "tn": 0,
+      "fp": 5,
+      "fn": 0,
+      "accuracy": 0.5,
+      "sensitivity": 1.0,
+      "specificity": 0.0,
+      "balanced_accuracy": 0.5
+    },
+    "train_sessions_[1, 2, 5]_test_session_4": {
+      "n_batches": 10,
+      "tp": 4,
+      "tn": 5,
+      "fp": 0,
+      "fn": 1,
+      "accuracy": 0.9,
+      "sensitivity": 0.8,
+      "specificity": 1.0,
+      "balanced_accuracy": 0.9
+    },
+    "train_sessions_[1, 2, 4]_test_session_5": {
+      "n_batches": 10,
+      "tp": 3,
+      "tn": 5,
+      "fp": 0,
+      "fn": 2,
+      "accuracy": 0.8,
+      "sensitivity": 0.6,
+      "specificity": 1.0,
+      "balanced_accuracy": 0.8
+    }
+  },
+  "paired_rounds": [
+    {
+      "session": 1,
+      "round": 1,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.15853655424240914,
+      "present_minus_absent_tone_spread_db": 0.09731570597992056
+    },
+    {
+      "session": 1,
+      "round": 2,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.09979730742261674,
+      "present_minus_absent_tone_spread_db": 0.02993840731467179
+    },
+    {
+      "session": 1,
+      "round": 3,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.10766661516279143,
+      "present_minus_absent_tone_spread_db": 0.06893081365669218
+    },
+    {
+      "session": 1,
+      "round": 4,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.03739378890669261,
+      "present_minus_absent_tone_spread_db": 0.026965306180032567
+    },
+    {
+      "session": 1,
+      "round": 5,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.0935854788913773,
+      "present_minus_absent_tone_spread_db": -0.08023213141152818
+    },
+    {
+      "session": 2,
+      "round": 1,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.12276440093480556,
+      "present_minus_absent_tone_spread_db": -0.07901923019156776
+    },
+    {
+      "session": 2,
+      "round": 2,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.11278578711897476,
+      "present_minus_absent_tone_spread_db": -0.0739252697656323
+    },
+    {
+      "session": 2,
+      "round": 3,
+      "absent_profiles": 50,
+      "present_profiles": 49,
+      "median_profile_distance_db_rms": 0.3194486000573961,
+      "present_minus_absent_tone_spread_db": -0.24661887804412985
+    },
+    {
+      "session": 2,
+      "round": 4,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.0739373766637829,
+      "present_minus_absent_tone_spread_db": -0.003415008333002678
+    },
+    {
+      "session": 2,
+      "round": 5,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.0848584300799363,
+      "present_minus_absent_tone_spread_db": -0.01415769792420929
+    },
+    {
+      "session": 4,
+      "round": 1,
+      "absent_profiles": 49,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.44789365008394955,
+      "present_minus_absent_tone_spread_db": -0.1538067740869309
+    },
+    {
+      "session": 4,
+      "round": 2,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.22681541284549364,
+      "present_minus_absent_tone_spread_db": -0.09894505752283189
+    },
+    {
+      "session": 4,
+      "round": 3,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.22548512218251227,
+      "present_minus_absent_tone_spread_db": -0.08266099878781241
+    },
+    {
+      "session": 4,
+      "round": 4,
+      "absent_profiles": 50,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.23145626204325073,
+      "present_minus_absent_tone_spread_db": -0.15804654851669742
+    },
+    {
+      "session": 4,
+      "round": 5,
+      "absent_profiles": 49,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.09381767169972532,
+      "present_minus_absent_tone_spread_db": -0.043099201391717745
+    },
+    {
+      "session": 5,
+      "round": 1,
+      "absent_profiles": 50,
+      "present_profiles": 49,
+      "median_profile_distance_db_rms": 0.2185016447140621,
+      "present_minus_absent_tone_spread_db": -0.020400390708073313
+    },
+    {
+      "session": 5,
+      "round": 2,
+      "absent_profiles": 48,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.2948082036710385,
+      "present_minus_absent_tone_spread_db": -0.159121363162413
+    },
+    {
+      "session": 5,
+      "round": 3,
+      "absent_profiles": 48,
+      "present_profiles": 50,
+      "median_profile_distance_db_rms": 0.29814192149004903,
+      "present_minus_absent_tone_spread_db": 0.05930029654208946
+    },
+    {
+      "session": 5,
+      "round": 4,
+      "absent_profiles": 50,
+      "present_profiles": 49,
+      "median_profile_distance_db_rms": 0.21893786562534637,
+      "present_minus_absent_tone_spread_db": -0.12273526586934835
+    },
+    {
+      "session": 5,
+      "round": 5,
+      "absent_profiles": 50,
+      "present_profiles": 48,
+      "median_profile_distance_db_rms": 0.21179562703573596,
+      "present_minus_absent_tone_spread_db": -0.059651697003865856
+    }
+  ],
+  "method": "For each batch, take the per-tone median across valid CSI profiles. Standardize using training batches only, fit two class centroids, and classify the held-out paired round by nearest centroid. The two batches in a held-out session-round are kept together.",
+  "interpretation": "Exploratory batch-level diagnostic only. Paired-round count and cross-session transfer results must be considered; no occupancy detector is justified unless performance is stable across independent development sessions.",
+  "detector_frozen": false,
+  "consumed_held_out_session_3_accessed": false
+}

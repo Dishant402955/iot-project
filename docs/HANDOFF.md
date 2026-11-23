@@ -14,6 +14,7 @@
 - `docs/DATA_COLLECTION.md`: collection approach and sample counts.
 - `docs/MODEL.md`: model and feature summary.
 - `docs/RESULTS.md`: development and live-demo results.
+- `docs/REPRODUCIBILITY.md`: development-only diagnostic workflow, data safeguards, and test commands.
 - `docs/LIVE_DEMO.md`: how to run the demo.
 - `models/`: selected model weights and metadata.
 - `tools/presence_demo.sh`: live demo launcher.

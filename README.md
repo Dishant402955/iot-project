@@ -45,6 +45,7 @@ In the controlled live demonstration, four consecutive batches matched the known
 - [Data collection](docs/DATA_COLLECTION.md)
 - [Model](docs/MODEL.md)
 - [Results](docs/RESULTS.md)
+- [Development analysis reproducibility](docs/REPRODUCIBILITY.md)
 - [Live demo](docs/LIVE_DEMO.md)
 - [Public dataset notes](data/public_dataset/README.md)
 
